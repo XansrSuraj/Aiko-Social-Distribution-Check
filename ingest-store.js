@@ -131,4 +131,14 @@ async function lastSeen() {
   return typeof all[HB_KEY] === "string" ? all[HB_KEY] : null;
 }
 
-module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen };
+/* Remove everything held for one channel — for clearing test data or a bad push. Returns how many
+   were dropped. The heartbeat and other channels are left untouched. */
+async function clear(channelId) {
+  const all = await readAll();
+  const had = Array.isArray(all[channelId]) ? all[channelId].length : 0;
+  delete all[channelId];
+  await writeAll(all);
+  return { removed: had };
+}
+
+module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, clear };

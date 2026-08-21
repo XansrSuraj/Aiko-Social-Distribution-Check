@@ -120,6 +120,15 @@ function call(method, body, query) {
   r = await call("GET", null, {});
   check(r.status === 400, "GET without a channelId is rejected", String(r.status));
 
+  console.log("\n── DELETE clears one channel (test data / bad push cleanup)");
+  check((await store.getPosts("vb")).length > 0, "vb has posts before delete");
+  r = await call("DELETE", null, { channelId: "vb" });
+  check(r.body.ok === true && r.body.removed > 0, "DELETE reports how many it removed", JSON.stringify(r.body));
+  check((await store.getPosts("vb")).length === 0, "vb is empty after delete");
+  check((await store.getPosts("vb2")).length === 1, "and another channel is left untouched");
+  r = await call("DELETE", null, {});
+  check(r.status === 400, "DELETE without a channelId is rejected", String(r.status));
+
   console.log("\n── a stranger cannot write to a deployment");
   delete require.cache[require.resolve("../api/ingest.js")];
   const handler = require("../api/ingest.js");

@@ -50,7 +50,7 @@ function authorised(req) {
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-ingest-key");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
   if (req.method === "OPTIONS") return res.status(204).end();
@@ -67,6 +67,13 @@ module.exports = async (req, res) => {
       if (!channelId) return res.status(400).json({ ok: false, error: "Pass ?channelId=…" });
       const posts = await store.getPosts(channelId);
       return res.status(200).json({ ok: true, channelId, posts, keptForDays: store.MAX_DAYS });
+    }
+
+    if (req.method === "DELETE") {
+      const channelId = String(((req.query && req.query.channelId) || (req.body && req.body.channelId)) || "").trim();
+      if (!channelId) return res.status(400).json({ ok: false, error: "Pass ?channelId=… to clear a channel." });
+      const out = await store.clear(channelId);
+      return res.status(200).json({ ok: true, channelId, ...out });
     }
 
     if (req.method !== "POST") return res.status(405).json({ ok: false, error: "Use POST." });
