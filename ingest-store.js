@@ -104,6 +104,7 @@ async function addPosts(channelId, posts) {
     .sort((a, b) => new Date(b.ts) - new Date(a.ts))
     .slice(0, MAX_PER_CHANNEL);
 
+  all[HB_KEY] = new Date().toISOString();      // a real post is also proof the phone is alive
   await writeAll(all);
   return { added, total: all[channelId].length };
 }
@@ -113,4 +114,21 @@ async function getPosts(channelId) {
   return Array.isArray(all[channelId]) ? all[channelId] : [];
 }
 
-module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS };
+/* Heartbeat. The forwarder on the phone hits this door on every notification AND on a periodic
+   ping, so "when did we last hear from the phone" is the honest signal for whether the pipeline is
+   still alive — a killed listener stops touching it, and the dashboard can then say so, with when.
+   Stored as a reserved key on the same row; getPosts ignores it (it is not an array), and addPosts
+   only ever rewrites a single channel's array, so it rides along untouched. */
+const HB_KEY = "__lastSeen";
+async function touch() {
+  const all = await readAll();
+  all[HB_KEY] = new Date().toISOString();
+  await writeAll(all);
+  return all[HB_KEY];
+}
+async function lastSeen() {
+  const all = await readAll();
+  return typeof all[HB_KEY] === "string" ? all[HB_KEY] : null;
+}
+
+module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen };

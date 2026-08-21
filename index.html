@@ -589,11 +589,37 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .ch-go{flex:none;color:var(--tx3);width:16px;height:16px;transition:color .16s,transform .16s}
 .ch-card:hover .ch-go{color:var(--a1);transform:translate(2px,-2px)}
 
+/* ── Viber pipeline monitor ── */
+.pipe{display:flex;align-items:center;gap:14px;background:var(--surf);border:1px solid var(--ln);
+  border-radius:var(--rm);box-shadow:var(--s1);padding:13px 18px;flex-wrap:wrap}
+.pipe-dot{width:12px;height:12px;border-radius:50%;flex:none;position:relative;background:var(--tx3)}
+.pipe-dot.ok{background:#22c55e}
+.pipe-dot.bad{background:#ef4444}
+.pipe-dot.idle{background:var(--tx3)}
+.pipe-dot.ok::after{content:"";position:absolute;inset:0;border-radius:50%;background:#22c55e;
+  animation:pipepulse 1.8s ease-out infinite}
+.pipe-dot.bad::after{content:"";position:absolute;inset:0;border-radius:50%;background:#ef4444;
+  animation:pipepulse 2.6s ease-out infinite}
+@keyframes pipepulse{0%{transform:scale(1);opacity:.65}100%{transform:scale(3.4);opacity:0}}
+.pipe-main{flex:1;min-width:200px}
+.pipe-eyebrow{font-size:10.5px;font-weight:750;letter-spacing:.13em;text-transform:uppercase;color:var(--tx3)}
+.pipe-sub{font-size:14px;color:var(--tx2);margin-top:2px}
+.pipe-sub b{color:var(--tx);font-weight:700}
+.pipe-at{color:var(--tx3);font-size:12.5px}
+.pipe-chans{display:flex;gap:8px;flex-wrap:wrap}
+.pipe-chan{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:650;
+  color:var(--tx2);background:var(--surf2);border:1px solid var(--ln);border-radius:999px;padding:5px 12px}
+.pipe-chan .pcd{width:7px;height:7px;border-radius:50%;background:var(--tx3);flex:none}
+.pipe-chan.on .pcd{background:#22c55e}
+.pipe-chan.stale .pcd{background:#f59e0b}
+@media(prefers-reduced-motion:reduce){.pipe-dot::after{animation:none!important}}
+
 @media(max-width:560px){
   .dash{padding:20px 15px 44px}
   .hero-card{padding:28px 22px 26px}
   .hero-h{font-size:26px}
   .ch-grid{grid-template-columns:1fr}
+  .pipe{padding:12px 14px}
 }
 </style>
 </head>
@@ -2516,6 +2542,15 @@ function render(){
         </div>
       </section>
 
+      <section class="pipe" id="pipeHealth" aria-live="polite">
+        <span class="pipe-dot idle"></span>
+        <div class="pipe-main">
+          <div class="pipe-eyebrow">Viber pipeline monitor</div>
+          <div class="pipe-sub" id="pipeSub">checking phone monitor…</div>
+        </div>
+        <div class="pipe-chans" id="pipeChans"></div>
+      </section>
+
       <section class="channels">
         <div class="channels-h">Channels watched <span class="ct">${o.socials.length}</span></div>
         ${langs.map(lg => `
@@ -2531,10 +2566,65 @@ function render(){
   document.getElementById("runDaily").onclick = () => dailyCheckModal(o);
 
   icons(app);
+  pollHealth();
   if(!booting){
     anim(".hero-card", { y:16, opacity:0, duration:.4 });
     anim(".ch-card", { y:14, opacity:0, stagger:.02, duration:.34 });
   }
+}
+
+/* ── phone / pipeline monitor ──────────────────────────────────────────────
+   A live read of /api/health: is the phone's forwarder still touching the server, and is each
+   watched Viber community receiving posts. Polled while the tab is open, so a listener that dies
+   surfaces here — with WHEN it went quiet — instead of failing silently. */
+let healthTimer = null;
+function agoStr(sec){
+  if(sec == null) return "";
+  if(sec < 60) return "just now";
+  const m = Math.round(sec / 60); if(m < 60) return m + "m ago";
+  const h = Math.floor(m / 60); if(h < 24) return h + "h " + (m % 60 ? (m % 60) + "m " : "") + "ago";
+  return Math.round(h / 24) + "d ago";
+}
+async function pollHealth(){
+  clearTimeout(healthTimer);
+  try{ paintHealth(await (await fetch("api/health", { cache:"no-store" })).json()); }
+  catch(e){ paintHealth(null); }
+  healthTimer = setTimeout(pollHealth, 45000);          // keep it live while the tab is open
+}
+function paintHealth(h){
+  const box = document.getElementById("pipeHealth"); if(!box) return;
+  const dot = box.querySelector(".pipe-dot");
+  const sub = document.getElementById("pipeSub");
+  const chans = document.getElementById("pipeChans");
+  if(chans) chans.innerHTML = "";
+
+  if(!h || !h.ok){
+    dot.className = "pipe-dot idle";
+    sub.innerHTML = "monitor unavailable — could not reach the server";
+    return;
+  }
+  const age = h.ageSeconds;
+  if(h.lastSeen == null){
+    dot.className = "pipe-dot idle";
+    sub.innerHTML = "<b>No signal yet</b> — send a test message, or add the heartbeat rule";
+    box.title = "No forwarded notification or heartbeat received yet";
+  }else if(age != null && age < 25 * 60){             // heartbeat ~15m; 25m gives margin
+    dot.className = "pipe-dot ok";
+    sub.innerHTML = "<b>Phone connected</b> · last seen " + esc(agoStr(age));
+    box.title = "Last heard from the phone: " + new Date(h.lastSeen).toLocaleString();
+  }else{
+    dot.className = "pipe-dot bad";
+    sub.innerHTML = "<b>Phone offline</b> · last seen " + esc(agoStr(age)) +
+      ' <span class="pipe-at">(' + esc(new Date(h.lastSeen).toLocaleString()) + ')</span>';
+    box.title = "The forwarder stopped touching the server at " + new Date(h.lastSeen).toLocaleString();
+  }
+
+  if(chans) chans.innerHTML = (h.channels || []).map(c => {
+    const t = c.lastPost ? (Date.now() - new Date(c.lastPost).getTime()) / 1000 : null;
+    const cls = (t != null && t < 48 * 3600) ? "on" : (c.lastPost ? "stale" : "none");
+    const tip = c.lastPost ? "last post " + agoStr(t) : "nothing received yet";
+    return `<span class="pipe-chan ${cls}" title="${esc(c.name)} — ${esc(tip)}"><span class="pcd"></span>${esc(c.name)}</span>`;
+  }).join("");
 }
 
 /* ═══════════════════ boot ═══════════════════ */

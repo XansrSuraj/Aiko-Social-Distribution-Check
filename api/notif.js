@@ -119,18 +119,33 @@ module.exports = async (req, res) => {
   const title = String(pick("title", "from", "message_from", "conversation") || "").trim();
   const text = String(pick("text", "body", "message_body", "message") || "").replace(/\\n/g, "\n").trim();
 
+  /* Any authenticated hit is proof the phone's forwarder is alive — record it so the dashboard's
+     monitor can tell "connected" from "went silent, since when". Never let a store hiccup fail the
+     reply (the forwarder must always get its 200). A real post refreshes this via addPosts instead. */
+  const beat = () => store.touch().catch(() => {});
+
+  /* An explicit heartbeat ping (a periodic Tasker rule) carries no post — it exists only to keep
+     the monitor green on a quiet day. Recognised early and answered plainly. */
+  if (/^\s*(ping|heartbeat)\s*$/i.test(String(app)) || pick("ping", "heartbeat")) {
+    await beat();
+    return res.status(200).json({ ok: true, heartbeat: true });
+  }
+
   if (!IS_VIBER(app)) {
     /* not an error — the forwarder may pass everything through; just decline quietly */
+    await beat();
     return res.status(200).json({ ok: true, ignored: "not a Viber notification", app: String(app) });
   }
 
   const hay = (title + " " + text).toLowerCase();
   const hit = COMMUNITIES.find(c => hay.includes(c.name));
   if (!hit) {
+    await beat();
     return res.status(200).json({ ok: true, ignored: "no watched community matched",
       title, watching: COMMUNITIES.map(c => c.name) });
   }
   if (!text || BUNDLE.test(text)) {
+    await beat();
     return res.status(200).json({ ok: true, ignored: "bundle or empty — no single post to file",
       channelId: hit.channelId, text });
   }
