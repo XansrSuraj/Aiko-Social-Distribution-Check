@@ -1496,7 +1496,8 @@ function reconcile(channels, opt){
          for a window the phone could not report on. */
       const mine = posts[c.id] || [];
       const beatMs = (checks.beats || []).map(t => new Date(t).getTime()).filter(n => isFinite(n));
-      const COVER = 20 * 60e3;             // a heartbeat within 20 min of a drop = phone online then
+      const COVER = 25 * 60e3;             // a heartbeat within 25 min of a drop = phone online then
+                                           // (15m interval + Doze drift, so allow a generous gap)
       cells = slots.map(s => {
         const start = new Date(s.at).getTime();
         const end = s.posts.reduce((m, p) => Math.max(m, new Date(p.ts).getTime()), start);
@@ -2641,7 +2642,9 @@ function paintHealth(h){
     dot.className = "pipe-dot idle";
     sub.innerHTML = "<b>No signal yet</b> — send a test message, or add the heartbeat rule";
     box.title = "No forwarded notification or heartbeat received yet";
-  }else if(age != null && age < 25 * 60){             // heartbeat ~15m; 25m gives margin
+  }else if(age != null && age < 35 * 60){             // heartbeat ~15m, but Android Doze can delay it
+                                                       // to ~20m; 35m tolerates one missed ping so
+                                                       // normal drift never flickers to false "offline"
     dot.className = "pipe-dot ok";
     sub.innerHTML = "<b>Phone connected</b> · last seen " + esc(agoStr(age));
     box.title = "Last heard from the phone: " + new Date(h.lastSeen).toLocaleString();
