@@ -1,0 +1,9 @@
+node_modules/
+.vercel
+.env
+.env*.local
+.DS_Store
+Thumbs.db
+*.log
+org-hub-backup.json
+.ingest.json

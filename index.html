@@ -1,0 +1,2574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aiko — official websites & social channels</title>
+<meta name="description" content="The internal directory of every official website and social media channel, always up to date.">
+<meta name="theme-color" content="#5b6bff">
+<meta name="robots" content="noindex, nofollow">
+<meta property="og:title" content="Aiko">
+<meta property="og:description" content="Every official website and social channel in one place.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%235b6bff'/%3E%3Cpath d='M9 21l7-13 7 13z' fill='white'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-icons-font@13/font/simple-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.454.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+<style>
+/* ═══════════════ tokens ═══════════════ */
+:root{
+  --a1:#5b6bff; --a2:#a855f7;
+  --bg:#f7f8fb; --bg-tint:#eef0f8;
+  --surf:#ffffff; --surf2:#f6f7fb; --surf3:#eef0f6;
+  --glass:rgba(255,255,255,.75);
+  --tx:#0b0e18; --tx2:#5a6280; --tx3:#9aa1bb;
+  --ln:#e7e9f2; --ln2:#f0f1f7;
+  --red:#e0342c; --amb:#d97706; --grn:#0f9d58;
+  --s1:0 1px 2px rgba(12,17,40,.05);
+  --s2:0 1px 3px rgba(12,17,40,.05),0 10px 26px -14px rgba(12,17,40,.2);
+  --s3:0 2px 8px rgba(12,17,40,.06),0 26px 60px -24px rgba(12,17,40,.3);
+  --s4:0 40px 90px -30px rgba(12,17,40,.45);
+  --rl:20px; --rm:14px; --rs:10px;
+  /* the browser draws select popups, the date picker, scrollbars and form focus rings itself, and
+     without this it draws all of them light — a white date picker over the dark theme */
+  color-scheme:light;
+}
+html[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#070810; --bg-tint:#0c0e18;
+  --surf:#101320; --surf2:#161a2a; --surf3:#1d2234;
+  --glass:rgba(14,17,28,.78);
+  --tx:#f0f2fa; --tx2:#98a0bd; --tx3:#69708c;
+  --ln:#212639; --ln2:#191d2c;
+  --red:#ff6b63; --amb:#fbbf24; --grn:#3ddc84;
+  --s1:0 1px 2px rgba(0,0,0,.35);
+  --s2:0 1px 3px rgba(0,0,0,.3),0 12px 30px -16px rgba(0,0,0,.75);
+  --s3:0 2px 10px rgba(0,0,0,.35),0 30px 70px -28px rgba(0,0,0,.9);
+  --s4:0 40px 100px -30px rgba(0,0,0,1);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;min-height:100vh;background:var(--bg);color:var(--tx);
+  font:15px/1.55 "Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-feature-settings:"cv02","cv03","cv04","tnum";
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+input,select,textarea{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+::selection{background:color-mix(in srgb,var(--a1) 28%,transparent)}
+.gt{background:linear-gradient(100deg,var(--a1),var(--a2) 70%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+/* ambient light */
+.aura{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.aura i{position:absolute;border-radius:50%;filter:blur(100px);opacity:.28}
+html[data-theme="dark"] .aura i{opacity:.2}
+.aura i:nth-child(1){width:44vw;height:44vw;background:var(--a1);top:-16vw;left:-10vw;animation:dr1 24s ease-in-out infinite}
+.aura i:nth-child(2){width:36vw;height:36vw;background:var(--a2);top:4vw;right:-12vw;animation:dr2 28s ease-in-out infinite}
+@keyframes dr1{50%{transform:translate(5vw,6vw) scale(1.15)}}
+@keyframes dr2{50%{transform:translate(-6vw,8vw) scale(.9)}}
+@media(prefers-reduced-motion:reduce){.aura i{animation:none}}
+
+/* ═══════════════ buttons ═══════════════ */
+.b{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;
+  border-radius:11px;font-weight:600;font-size:13.5px;letter-spacing:-.1px;white-space:nowrap;
+  background:var(--surf2);border:1px solid var(--ln);
+  transition:transform .16s cubic-bezier(.2,.9,.3,1.35),box-shadow .18s,background .18s,border-color .18s,color .18s}
+.b:hover{transform:translateY(-1.5px);box-shadow:var(--s1);border-color:color-mix(in srgb,var(--a1) 42%,var(--ln))}
+.b:active{transform:translateY(0) scale(.97)}
+.b.p{background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;border-color:transparent;
+  box-shadow:0 6px 20px -9px color-mix(in srgb,var(--a1) 90%,transparent)}
+.b.p:hover{box-shadow:0 14px 32px -11px color-mix(in srgb,var(--a1) 95%,transparent)}
+.b.g{background:none;border-color:transparent;color:var(--tx2)}
+.b.g:hover{background:var(--surf2);color:var(--tx);border-color:var(--ln)}
+.b.d{color:var(--red)}
+.b.d:hover{border-color:var(--red);background:color-mix(in srgb,var(--red) 10%,transparent)}
+.b.s{padding:6px 11px;font-size:12.5px;border-radius:9px;gap:5px}
+.b.i{padding:0;width:32px;height:32px;border-radius:9px;flex:none}
+.b.i.s{width:28px;height:28px;border-radius:8px}
+.b.xl{padding:13px 22px;font-size:15px;border-radius:13px}
+.b[disabled]{opacity:.4;pointer-events:none}
+.b svg{width:15px;height:15px;flex:none}
+.b.xl svg{width:17px;height:17px}
+.b.i.s svg{width:13px;height:13px}
+
+/* ═══════════════ topbar ═══════════════ */
+header{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:11px;padding:11px 20px;
+  background:var(--glass);backdrop-filter:blur(20px) saturate(1.7);border-bottom:1px solid var(--ln);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:750;font-size:16.5px;letter-spacing:-.4px}
+.brand .m{width:30px;height:30px;border-radius:10px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;box-shadow:0 5px 16px -6px color-mix(in srgb,var(--a1) 90%,transparent)}
+.brand .m svg{width:16px;height:16px}
+.sp{flex:1}
+.sbox{display:flex;align-items:center;gap:9px;background:var(--surf2);border:1px solid var(--ln);
+  border-radius:999px;padding:8px 14px;min-width:210px;transition:.2s}
+.sbox:focus-within{border-color:var(--a1);background:var(--surf);box-shadow:0 0 0 4px color-mix(in srgb,var(--a1) 13%,transparent)}
+.sbox input{background:none;border:0;outline:none;width:100%;min-width:0;font-size:14px}
+.sbox svg{width:15px;height:15px;color:var(--tx3);flex:none}
+.kb{font:600 10.5px/1 ui-monospace,monospace;color:var(--tx3);border:1px solid var(--ln);border-radius:5px;padding:3px 5px;background:var(--surf);flex:none}
+.sync{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:650;padding:6px 11px;
+  border-radius:999px;border:1px solid var(--ln);background:var(--surf2);color:var(--tx2)}
+.sync .d{width:6px;height:6px;border-radius:50%;background:var(--tx3)}
+.sync.on .d{background:var(--grn);box-shadow:0 0 0 3px color-mix(in srgb,var(--grn) 22%,transparent)}
+.sync.warn{color:var(--amb);border-color:color-mix(in srgb,var(--amb) 40%,transparent)}
+.sync.warn .d{background:var(--amb)}
+.sync.busy .d{background:var(--a1);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* ═══════════════ layout ═══════════════ */
+.shell{display:grid;grid-template-columns:262px 1fr;gap:20px;max-width:1460px;margin:0 auto;padding:20px;align-items:start}
+.card{background:var(--surf);border:1px solid var(--ln);border-radius:var(--rl);box-shadow:var(--s2)}
+aside{position:sticky;top:82px}
+.rail-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 15px;border-bottom:1px solid var(--ln2)}
+.rail-h h2{margin:0;font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--tx3);font-weight:750}
+.rail{max-height:calc(100vh - 240px);overflow:auto;padding:9px}
+.rail::-webkit-scrollbar{width:7px}.rail::-webkit-scrollbar-thumb{background:var(--ln);border-radius:8px}
+.oi{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:9px 10px;border-radius:12px;
+  border:1px solid transparent;margin-bottom:2px;transition:.16s;position:relative}
+.oi:hover{background:var(--surf2)}
+.oi.on{background:color-mix(in srgb,var(--a1) 10%,transparent);border-color:color-mix(in srgb,var(--a1) 26%,transparent)}
+.oi.on::before{content:"";position:absolute;left:-9px;top:50%;transform:translateY(-50%);width:3px;height:20px;
+  border-radius:0 3px 3px 0;background:linear-gradient(var(--a1),var(--a2))}
+.oi .nm{font-weight:650;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.oi .sb{font-size:11.5px;color:var(--tx2);display:block}
+
+/* logo blocks */
+.lg{width:36px;height:36px;border-radius:11px;flex:none;position:relative;overflow:hidden;box-shadow:var(--s1);
+  display:grid;place-items:center;background:var(--surf3)}
+.lg img{width:100%;height:100%;object-fit:cover;display:block}
+.lg .fb{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-weight:750;font-size:13px;letter-spacing:-.4px}
+.lg.xl{width:64px;height:64px;border-radius:18px}
+.lg.xl .fb{font-size:23px}
+.lg.sm{width:30px;height:30px;border-radius:9px}
+.lg.sm .fb{font-size:11px}
+
+/* ═══════════════ detail ═══════════════ */
+.main{display:flex;flex-direction:column;gap:18px;min-width:0}
+.hero{padding:22px;position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,var(--a1),var(--a2),transparent)}
+.hero-top{display:flex;gap:16px;align-items:flex-start}
+.hero h1{margin:0 0 5px;font-size:26px;letter-spacing:-.9px;font-weight:780;line-height:1.15}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tag{font-size:11.5px;font-weight:650;padding:3px 10px;border-radius:999px;background:var(--surf2);border:1px solid var(--ln);color:var(--tx2)}
+.notes{margin:11px 0 0;color:var(--tx2);font-size:13.5px;white-space:pre-wrap;max-width:72ch}
+.tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--ln2)}
+
+.mrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.m{background:var(--surf);border:1px solid var(--ln);border-radius:var(--rm);padding:14px 16px;box-shadow:var(--s1)}
+.m b{display:block;font-size:24px;font-weight:750;letter-spacing:-1px;line-height:1.1}
+.m span{font-size:11.5px;color:var(--tx2);font-weight:650;letter-spacing:.02em}
+.m .hl{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11.5px;font-weight:650}
+
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;padding:0 2px}
+.sec-h h3{margin:0;font-size:15px;display:flex;align-items:center;gap:9px;letter-spacing:-.3px;font-weight:720}
+.sec-h h3 svg{width:16px;height:16px;color:var(--a1)}
+.ct{font-size:11.5px;font-weight:750;color:var(--tx2);background:var(--surf2);border:1px solid var(--ln);padding:1px 8px;border-radius:999px}
+
+/* tile grid — the main visual upgrade */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:12px}
+.t{--c:var(--a1);position:relative;background:var(--surf);border:1px solid var(--ln);border-radius:var(--rm);
+  padding:14px;box-shadow:var(--s1);overflow:hidden;transition:transform .2s cubic-bezier(.2,.9,.3,1.2),box-shadow .22s,border-color .2s}
+.t::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:var(--c);opacity:.9}
+.t::after{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:.22s;
+  background:radial-gradient(120% 90% at 50% 0%,color-mix(in srgb,var(--c) 13%,transparent),transparent 70%)}
+.t:hover{transform:translateY(-3px);box-shadow:var(--s3);border-color:color-mix(in srgb,var(--c) 40%,var(--ln))}
+.t:hover::after{opacity:1}
+.t .r1{display:flex;align-items:flex-start;gap:10px;margin-bottom:11px}
+.t .nm{display:block;font-weight:680;font-size:14px;letter-spacing:-.2px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t .hd{display:block;font-size:12px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t .lk{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--tx2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 8px;border-radius:8px;
+  background:var(--surf2);border:1px solid var(--ln2);transition:.16s}
+.t .lk:hover{color:var(--c);border-color:color-mix(in srgb,var(--c) 45%,transparent)}
+.t .lk svg{width:12px;height:12px;flex:none;opacity:.7}
+.t .tb{display:flex;gap:3px;justify-content:flex-end;margin-top:9px;opacity:0;transform:translateY(4px);transition:.2s}
+.t:hover .tb,.t:focus-within .tb{opacity:1;transform:none}
+@media(hover:none){.t .tb{opacity:1;transform:none}}
+.chip{width:34px;height:34px;border-radius:10px;flex:none;display:grid;place-items:center;color:#fff;
+  font-weight:800;font-size:11.5px;box-shadow:var(--s1);border:1px solid rgba(255,255,255,.16);background:var(--c)}
+.chip i.si{font-size:16px;line-height:1}
+.chip svg{width:17px;height:17px}
+.chip .ini{display:block}
+body.si-ok .chip .ini{display:none}
+body:not(.si-ok) .chip i.si{display:none}
+.hd-dot{width:8px;height:8px;border-radius:50%;flex:none;margin-left:auto;background:var(--tx3);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--tx3) 18%,transparent);cursor:help}
+.hd-dot.ok{background:var(--grn);box-shadow:0 0 0 3px color-mix(in srgb,var(--grn) 20%,transparent)}
+.hd-dot.warn{background:var(--amb);box-shadow:0 0 0 3px color-mix(in srgb,var(--amb) 20%,transparent)}
+.hd-dot.bad{background:var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 20%,transparent)}
+.hd-dot.spin{background:var(--a1);animation:pulse .9s ease-in-out infinite}
+
+.empty{padding:38px 20px;text-align:center;color:var(--tx2);font-size:13.5px;
+  border:1.5px dashed var(--ln);border-radius:var(--rm);background:var(--surf2)}
+.empty b{display:block;color:var(--tx);margin-bottom:5px;font-size:15px;font-weight:700}
+.empty .e{width:44px;height:44px;border-radius:13px;margin:0 auto 12px;display:grid;place-items:center;
+  background:var(--surf);border:1px solid var(--ln);color:var(--tx3)}
+.empty .e svg{width:20px;height:20px}
+.note{display:flex;align-items:flex-start;gap:10px;padding:12px 15px;border-radius:var(--rm);font-size:13.5px;line-height:1.55;
+  background:color-mix(in srgb,var(--a1) 8%,transparent);border:1px solid color-mix(in srgb,var(--a1) 24%,transparent)}
+.note.warn{background:color-mix(in srgb,var(--amb) 10%,transparent);border-color:color-mix(in srgb,var(--amb) 34%,transparent)}
+.note svg{width:16px;height:16px;flex:none;margin-top:2px;color:var(--a1)}
+.note.warn svg{color:var(--amb)}
+.note .b{margin-left:auto;flex:none}
+
+footer{border-top:1px solid var(--ln);padding:24px 20px 36px;text-align:center;color:var(--tx3);font-size:12.5px;line-height:1.9}
+
+/* ═══════════════ modal ═══════════════ */
+.veil{position:fixed;inset:0;z-index:110;display:none;place-items:center;padding:18px;
+  background:rgba(5,7,15,.62);backdrop-filter:blur(6px)}
+.veil.on{display:grid}
+.mo{background:var(--surf);border:1px solid var(--ln);border-radius:22px;box-shadow:var(--s4);
+  width:100%;max-width:490px;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.mo.w{max-width:660px}
+.mo.xw{max-width:980px}
+
+/* ═══════════════ daily check report ═══════════════ */
+/* ── the control strip ──
+   These four are set once and then rarely touched, so they are deliberately quiet — but they were
+   also four bare dropdowns in a row, and "±15 min" and "max 4" say nothing at all about what they
+   govern until you hover them. Each carries its own standing label now. */
+.dc-top{border:1px solid var(--ln);border-radius:var(--rm);background:var(--surf2);
+  padding:11px 13px 12px;margin-bottom:11px}
+.dc-bar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:9px}
+.dc-bar .sp{flex:1}
+.dc-fld{display:flex;flex-direction:column;gap:5px;min-width:0}
+.dc-fld > span{font-size:9.5px;font-weight:780;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--tx3);padding-left:2px;white-space:nowrap}
+/* a select is not a button: it needs its own colours, and the button hover-lift reads as a bug on it */
+.dc-bar select{padding:6px 10px;font:inherit;font-size:12.5px;font-weight:600;border-radius:var(--rs);
+  background:var(--surf);color:var(--tx);border:1px solid var(--ln);cursor:pointer}
+.dc-bar select:hover{border-color:color-mix(in srgb,var(--a1) 42%,var(--ln))}
+.dc-bar select:focus-visible{outline:2px solid var(--a1);outline-offset:-1px}
+.dc-when{font-size:11px;color:var(--tx3);font-weight:600;white-space:nowrap;padding-bottom:7px}
+.dc-day{border:1px solid var(--ln);border-radius:14px;margin-bottom:13px;overflow:hidden;background:var(--surf2)}
+.dc-day:last-child{margin-bottom:0}
+.dc-dh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:11px 14px;background:var(--surf)}
+.dc-dh b{font-size:14.5px;letter-spacing:-.2px}
+.dc-dh .sp{flex:1}
+.dc-pill{font-size:11px;font-weight:730;padding:2.5px 9px;border-radius:20px;white-space:nowrap}
+.dc-pill.ok{background:color-mix(in srgb,var(--grn) 17%,transparent);color:var(--grn)}
+.dc-pill.short{background:color-mix(in srgb,var(--red) 17%,transparent);color:var(--red)}
+.dc-pill.un{background:color-mix(in srgb,var(--tx3) 20%,transparent);color:var(--tx2)}
+.dc-pill.sg{background:color-mix(in srgb,var(--amb) 18%,transparent);color:var(--amb)}
+/* the readout of the controls directly above it — which is why it sits inside the same panel
+   rather than floating between the sources and the tabs, where it belonged to neither */
+.dc-win{font-size:11.5px;color:var(--tx3);font-weight:600;margin-top:10px;padding-top:9px;
+  border-top:1px dashed var(--ln2)}
+.dc-win b{font-size:12px;color:var(--tx2);font-variant-numeric:tabular-nums;font-weight:700}
+
+/* sources — what has reported, and what is still waiting */
+.dc-srcs{border:1px solid var(--ln);border-radius:13px;overflow:hidden;margin-bottom:13px}
+.dc-run{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 13px;
+  background:color-mix(in srgb,var(--a1) 7%,var(--surf2));border-bottom:1px solid var(--ln2)}
+.dc-run .sp{flex:1}
+.dc-src{display:flex;align-items:center;gap:9px;padding:9px 13px;background:var(--surf2);font-size:12.5px}
+.dc-src + .dc-src{border-top:1px solid var(--ln2)}
+/* a source this org has no channels for — present so the split stays legible, but muted, because
+   it is not a source that failed */
+.dc-src.none{opacity:.55}
+/* Same specificity as `.dc-src .dot.off` below and declared earlier, so the red lost to it and a
+   source this org simply has no channels for rendered as a red "broken" dot. Qualified so the
+   neutral wins for the one case it is meant to cover. */
+.dc-src.none .dot,.dc-src.none .dot.off{background:var(--tx3)}
+.dc-src b{font-size:12.5px;font-weight:700}
+.dc-src .sp{flex:1}
+.dc-sw{color:var(--tx3);font-size:11.5px}
+.dc-sn{color:var(--tx2);font-size:11.5px;font-weight:640;white-space:nowrap}
+.dc-src .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--tx3)}
+.dc-src .dot.on{background:var(--grn)}
+.dc-src .dot.part{background:var(--amb)}
+.dc-src .dot.off{background:color-mix(in srgb,var(--red) 70%,transparent)}
+
+/* tabs */
+.dc-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--ln);margin-bottom:14px}
+.dc-tab{padding:8px 13px;font:inherit;font-size:12.5px;font-weight:650;color:var(--tx2);
+  background:none;border:0;border-bottom:2px solid transparent;cursor:pointer;margin-bottom:-1px}
+.dc-tab:hover{color:var(--tx)}
+.dc-tab.on{color:var(--a1);border-bottom-color:var(--a1)}
+.dc-tab .ct{font-size:10px;padding:1px 5px}
+
+/* post log */
+/* The centring rule lives on `table.dc.mx`, and the post-log table carries no .mx — so every
+   ctr on Views/Likes/Comments/Length silently did nothing and the figures ran ragged-left, which
+   also wasted the tabular-nums they are set in. Numbers align right, where digits line up. */
+table.dc td.num,table.dc th.num{text-align:right;font-variant-numeric:tabular-nums}
+table.dc .mono{font-variant-numeric:tabular-nums;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}
+table.dc td.cap{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--tx2)}
+table.dc tr.warnrow td{background:color-mix(in srgb,var(--amb) 9%,transparent)}
+table.dc a{color:var(--a1)}
+table.dc a svg{width:14px;height:14px;vertical-align:-2px}
+
+/* per channel */
+.dc-ch{border:1px solid var(--ln);border-radius:13px;padding:11px 13px;margin-bottom:9px;background:var(--surf2)}
+.dc-cht{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dc-cht b{font-size:13.5px}
+.dc-cht .sp{flex:1}
+.dc-plist{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+.dc-p{display:flex;gap:9px;padding:7px 9px;border-radius:10px;background:var(--surf);border:1px solid var(--ln2)}
+.dc-p.bad{border-color:color-mix(in srgb,var(--amb) 45%,var(--ln))}
+.dc-pm{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.dc-pm b{font-size:12px}
+.dc-pill.okc{background:color-mix(in srgb,var(--grn) 13%,transparent);color:var(--grn);
+  outline:1px dashed color-mix(in srgb,var(--grn) 50%,transparent);outline-offset:-1px}
+.dc-pt{margin-top:4px;font-size:12px;color:var(--tx2);line-height:1.45}
+.dc-th{width:54px;height:54px;object-fit:cover;border-radius:9px;flex:none;background:var(--surf)}
+.dc-th.sm{width:40px;height:40px;border-radius:7px}
+/* the drop's artwork rather than this channel's own — dashed so the difference is visible */
+.dc-th.borrowed{outline:1px dashed color-mix(in srgb,var(--tx3) 60%,transparent);outline-offset:1px;opacity:.75}
+.dc-spread{display:flex;flex-wrap:wrap;gap:9px;margin-top:5px;font-size:11.5px;color:var(--tx3)}
+.dc-spread b{font-variant-numeric:tabular-nums;color:var(--tx2);font-size:11.5px}
+.dc-dt2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* headline — the answer before any detail, and the one thing that should land first. The icon
+   sits in its own tinted disc so the verdict is readable as a shape before a word of it is read. */
+.dc-head{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:var(--rm);
+  margin-bottom:14px;border:1px solid var(--ln);background:var(--surf2);font-size:13px}
+.dc-head > svg{width:20px;height:20px;flex:none;padding:7px;border-radius:50%;box-sizing:content-box;
+  background:color-mix(in srgb,var(--tx3) 15%,transparent);color:var(--tx2)}
+.dc-head b{font-size:14.5px;letter-spacing:-.2px}
+.dc-head.good{border-color:color-mix(in srgb,var(--grn) 38%,var(--ln));
+  background:color-mix(in srgb,var(--grn) 6%,var(--surf2))}
+.dc-head.good > svg{color:var(--grn);background:color-mix(in srgb,var(--grn) 16%,transparent)}
+.dc-head.bad{border-color:color-mix(in srgb,var(--red) 38%,var(--ln));
+  background:color-mix(in srgb,var(--red) 5%,var(--surf2))}
+.dc-head.bad > svg{color:var(--red);background:color-mix(in srgb,var(--red) 15%,transparent)}
+.dc-head.warn{border-color:color-mix(in srgb,var(--amb) 38%,var(--ln));
+  background:color-mix(in srgb,var(--amb) 6%,var(--surf2))}
+.dc-head.warn > svg{color:var(--amb);background:color-mix(in srgb,var(--amb) 16%,transparent)}
+.dc-sub{color:var(--tx2);font-size:12.5px;margin-top:3px}
+.dc-alist{margin-top:8px;display:flex;flex-direction:column;gap:5px}
+/* Two columns, not a wrapping flex row. As a flex row the badge, the channel name and the
+   sentence were three siblings, so a long sentence wrapped back to the left margin and sat under
+   its own badge — which read as a second, unlabelled alert. The grid pins the badge in its own
+   column and lets the sentence wrap under itself. */
+.dc-al{font-size:12.5px;color:var(--tx2);display:grid;grid-template-columns:auto minmax(0,1fr);
+  gap:7px;align-items:baseline}
+.dc-al .dc-at{min-width:0}
+.dc-al b{font-size:12.5px;color:var(--tx);font-weight:650}
+.dc-ak{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  padding:1.5px 6px;border-radius:20px;flex:none;
+  background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
+.dc-al.lang .dc-ak{background:color-mix(in srgb,var(--amb) 18%,transparent);color:var(--amb)}
+.dc-al.over .dc-ak{background:color-mix(in srgb,var(--a1) 16%,transparent);color:var(--a1)}
+/* "maybe" is a short count on a channel whose whole window could not be read — a question, not
+   a finding, and it must not look like one */
+.dc-al.maybe .dc-ak{background:color-mix(in srgb,var(--tx3) 22%,transparent);color:var(--tx2)}
+/* "late" is the drop that did arrive, hours after the rest. It is worth saying and it is not a
+   failure, so it reads quieter than a miss — the same weight as the informational counts. */
+.dc-al.late .dc-ak{background:color-mix(in srgb,var(--a1) 15%,transparent);color:var(--a1)}
+.dc-pill.late{background:color-mix(in srgb,var(--a1) 15%,transparent);color:var(--a1)}
+.dc-lt{font-style:normal;font-weight:750;font-size:10px;margin-left:3px;padding:0 4px;
+  border-radius:20px;background:color-mix(in srgb,var(--a1) 16%,transparent);color:var(--a1)}
+.dc-bar input[type=date]{padding:6px 9px;font:inherit;font-size:12.5px;font-weight:600;
+  border-radius:9px;background:var(--surf2);color:var(--tx);border:1px solid var(--ln)}
+
+/* matrix — a row per channel, a column per drop */
+table.dc.mx th.ctr,table.dc.mx td.ctr{text-align:center}
+table.dc.mx th.ctr .dy{display:block;font-size:9px;color:var(--tx3);font-weight:600;letter-spacing:0}
+/* how many channels that drop actually reached. A column that underperformed is then visible from
+   the header alone, without reading down the whole column counting ticks. */
+table.dc.mx th.ctr .cov{display:block;font-size:9px;font-weight:700;letter-spacing:0;
+  color:var(--tx3);font-variant-numeric:tabular-nums;margin-top:2px}
+/* amber, not red: the crosses in the column are the failure and own that colour. This is a
+   scanning aid pointing at which column to look down, and three red counts in the header simply
+   competed with the cells they were meant to lead the eye to. */
+table.dc.mx th.ctr .cov.short{color:var(--amb)}
+/* The matrix is read purely by position — a grid of ✓ ≈ ✗ · where only the column says which drop
+   a mark belongs to. Past about ten channels the drop times scrolled out of the modal body and
+   left unlabelled columns behind, so the head is pinned. */
+table.dc.mx thead th{position:sticky;top:0;z-index:2;background:var(--surf);
+  box-shadow:inset 0 -1px 0 var(--ln)}
+table.dc.mx .stick{position:sticky;left:0;background:var(--surf2);z-index:1;
+  max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table.dc.mx thead .stick{z-index:3}
+table.dc.mx tr.lgrp .stick{background:var(--surf)}
+/* the channel column stays put while the drops scroll under it — it needs an edge, or the two
+   halves visually merge the moment the table is wider than the modal */
+table.dc.mx .stick::after{content:"";position:absolute;top:0;right:0;bottom:0;width:1px;
+  background:var(--ln)}
+table.dc.mx tbody tr:not(.lgrp):hover td{background:color-mix(in srgb,var(--a1) 6%,transparent)}
+table.dc.mx tbody tr:not(.lgrp):hover .stick{background:color-mix(in srgb,var(--a1) 6%,var(--surf2))}
+.cl{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+  border-radius:7px;font-size:13px;font-weight:800;line-height:1}
+.cl sup{font-size:8px;font-weight:700;margin-left:1px}
+.cl.ok{background:color-mix(in srgb,var(--grn) 16%,transparent);color:var(--grn)}
+.cl.okc{background:color-mix(in srgb,var(--grn) 12%,transparent);color:var(--grn);
+  outline:1px dashed color-mix(in srgb,var(--grn) 55%,transparent);outline-offset:-1px}
+/* Posted, but hours behind the rest of its drop. It stays a solid green tick, because it did go
+   out — and it is marked with a corner dot rather than a dashed outline and an accent tint. Two
+   reasons. The dashed outline already means "arrived at indirectly" (okc, borrowed art) and must
+   not also mean "arrived late". And --a1 is user-configurable across seven themes plus custom, so
+   an accent-tinted cell beside a --grn one merges entirely the moment somebody picks green. */
+.cl.ok.lt{position:relative}
+.cl.ok.lt::after{content:"";position:absolute;top:-1px;right:-1px;width:7px;height:7px;
+  border-radius:50%;background:var(--a1);box-shadow:0 0 0 1.5px var(--surf2)}
+/* ticked by a person. A tick — the post did go out — but hollow, so a glance across the matrix
+   still separates what was measured from what someone vouched for. */
+.cl.okh{background:none;color:var(--grn);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--grn) 55%,transparent)}
+/* a cell waiting to be answered invites the click; the rest of the matrix never moves under the
+   cursor, so the affordance is only ever where there is something to do */
+td.ask .cl{cursor:pointer;transition:transform .12s,box-shadow .12s}
+td.ask:hover .cl{transform:scale(1.14);box-shadow:0 0 0 2px color-mix(in srgb,var(--a1) 45%,transparent)}
+td.ask .cl.none{border-style:dashed;border-color:color-mix(in srgb,var(--a1) 45%,var(--ln))}
+.dc-ask{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.dc-askb{font:inherit;font-size:10.5px;font-weight:700;padding:2.5px 8px;border-radius:20px;
+  border:1px solid var(--ln);background:var(--surf);color:var(--tx2);cursor:pointer;
+  white-space:nowrap;text-decoration:none;display:inline-block}
+.dc-askb:hover{border-color:var(--a1);color:var(--a1)}
+.cl.miss{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
+.cl.lang{background:color-mix(in srgb,var(--amb) 20%,transparent);color:var(--amb)}
+/* A hole, not a blank. At 55% opacity the dot was indistinguishable from an empty cell, so "we
+   have no data for this channel" read as "nothing was posted" — the one confusion this report
+   exists to prevent. An outlined empty box reads as a cell nobody could fill. */
+.cl.none{color:var(--tx3);background:none;border:1px dashed var(--ln);font-size:11px}
+/* full sentences lived under a bare unlabelled header and set the table's width from the far
+   right, pushing the drop columns the report is actually read for off-screen */
+table.dc.mx th.whyc,table.dc.mx td.mt{max-width:190px;white-space:normal;line-height:1.4}
+.dc-key{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:11.5px;color:var(--tx3)}
+.dc-key span{display:inline-flex;align-items:center;gap:5px}
+.dc-key .cl{width:19px;height:19px;font-size:11px}
+
+/* what went out */
+.dc-drop{border:1px solid var(--ln);border-radius:12px;padding:10px 13px;margin-bottom:8px;background:var(--surf2)}
+.dc-drop.gap{border-color:color-mix(in srgb,var(--red) 42%,var(--ln))}
+.dc-dt{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dc-dt b{font-size:13.5px}
+.dc-dt .sp{flex:1}
+.dc-cap{margin-top:7px;font-size:12.5px;color:var(--tx2);line-height:1.5}
+.dc-miss{margin-top:6px;font-size:12px;color:var(--red);font-weight:650}
+.dc-tw{overflow-x:auto;border-top:1px solid var(--ln2)}
+table.dc{width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px}
+table.dc th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--tx3);font-weight:730;padding:8px 12px;background:var(--surf)}
+table.dc td{padding:8px 12px;border-top:1px solid var(--ln2);vertical-align:middle}
+/* the language-group divider inside the matrix. Named lgrp, not lg: .lg is the logo block
+   (36px, display:grid) and a <tr class="lg"> inherited it, which turned the row into a grid,
+   dropped its colspan and squeezed every group heading into a 36px column. */
+table.dc tr.lgrp td{background:var(--surf);font-weight:700;font-size:11px;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--tx2);
+  /* an accent rule on the leading edge, so a group reads as a deliberate divider rather than as
+     one more row that happens to be shouting */
+  box-shadow:inset 3px 0 0 color-mix(in srgb,var(--a1) 45%,transparent);
+  padding-top:11px;padding-bottom:7px}
+table.dc tr.lgrp + tr td{border-top-color:transparent}
+table.dc .ch{font-weight:650}
+table.dc .mt{color:var(--tx3);font-size:11.5px}
+table.dc input.cnt{width:58px;padding:4px 7px;border:1px solid var(--ln);border-radius:7px;
+  background:var(--bg);color:var(--tx);font:inherit;text-align:center}
+.dc-empty{padding:26px 18px;text-align:center;color:var(--tx2);font-size:13px}
+/* the four tabs differ wildly in height, and without a floor the whole modal snapped taller and
+   shorter as you moved between them, throwing the footer buttons around under the cursor */
+.dc-panel{min-height:340px}
+/* a suggestion must never look like a measurement — the dashed border is the same language okc
+   and borrowed art already use for "arrived at indirectly", here on a value awaiting confirmation */
+table.dc input.cnt.guess{border-style:dashed;border-color:color-mix(in srgb,var(--amb) 55%,var(--ln));
+  color:var(--tx2)}
+.dc-pill.guess{background:none;color:var(--amb);
+  outline:1px dashed color-mix(in srgb,var(--amb) 55%,transparent);outline-offset:-1px}
+
+/* narrow screens — the modal is the densest thing in the app and had no handling at all */
+@media (max-width:640px){
+  .mb{padding:13px}
+  .dc-top{padding:10px}
+  .dc-bar{gap:7px}
+  .dc-fld{flex:1 1 132px}
+  .dc-bar select,.dc-bar input[type=date]{width:100%}
+  .dc-when{padding-bottom:0;width:100%}
+  /* the strip scrolls sideways as one row; without holding the tabs their own width they shrink
+     instead and "What went out" breaks across three lines */
+  .dc-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .dc-tabs::-webkit-scrollbar{display:none}
+  .dc-tab{flex:none;white-space:nowrap}
+  /* the source rows carry four things across; let them stack rather than run off the edge */
+  .dc-src{flex-wrap:wrap;row-gap:2px}
+  .dc-src .sp{flex-basis:100%;height:0}
+  .dc-run{padding:10px}
+  table.dc.mx .stick{max-width:132px}
+  /* three buttons do not fit on one line at this width, and the first was sliding off it */
+  .mf{flex-wrap:wrap;padding:12px 13px}
+}
+.mh{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:17px 19px;border-bottom:1px solid var(--ln2)}
+.mh h3{margin:0;font-size:17px;letter-spacing:-.4px;display:flex;align-items:center;gap:9px;font-weight:730}
+.mh h3 svg{width:18px;height:18px;color:var(--a1)}
+.mb{padding:19px;overflow:auto}
+.mf{display:flex;gap:9px;justify-content:flex-end;padding:15px 19px;border-top:1px solid var(--ln2);background:var(--surf2)}
+.f{margin-bottom:15px}.f:last-child{margin-bottom:0}
+.f label{display:block;font-size:11.5px;font-weight:750;margin-bottom:7px;color:var(--tx2);letter-spacing:.05em;text-transform:uppercase}
+.f input[type=text],.f input[type=password],.f select,.f textarea{width:100%;padding:11px 13px;border:1px solid var(--ln);
+  border-radius:11px;background:var(--surf2);outline:none;transition:.18s}
+.f input:focus,.f select:focus,.f textarea:focus{border-color:var(--a1);background:var(--surf);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--a1) 13%,transparent)}
+.f textarea{resize:vertical;min-height:70px}
+.hint{font-size:12px;color:var(--tx3);margin-top:7px;line-height:1.55}
+.err{color:var(--red);font-size:13px;font-weight:650;margin-top:12px;display:none;padding:9px 12px;
+  border-radius:10px;background:color-mix(in srgb,var(--red) 10%,transparent)}
+.err.on{display:block}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.dv{height:1px;background:var(--ln2);margin:19px 0}
+.sr{display:flex;align-items:center;justify-content:space-between;gap:13px;padding:10px 0}
+.sr .t1{font-weight:660;font-size:14px}
+.sr .d1{font-size:12.5px;color:var(--tx2)}
+.pr{display:flex;align-items:center;gap:10px;padding:7px;border-radius:10px;transition:.15s}
+.pr:hover{background:var(--surf2)}
+.sws{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sw{width:28px;height:28px;border-radius:9px;border:2.5px solid transparent;cursor:pointer;transition:.16s}
+.sw:hover,.sw.on{transform:scale(1.12)}
+.sw.on{border-color:var(--tx)}
+.seg{display:flex;gap:3px;background:var(--surf2);border:1px solid var(--ln);border-radius:11px;padding:3px}
+.seg button{padding:6px 13px;border-radius:8px;font-size:12.5px;font-weight:660;color:var(--tx2);transition:.16s}
+.seg button.on{background:var(--surf);color:var(--tx);box-shadow:var(--s1)}
+pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);border:1px solid var(--ln);
+  font:500 12px/1.65 ui-monospace,"SF Mono",Menlo,Consolas,monospace;overflow-x:auto;white-space:pre;color:var(--tx)}
+#qrbox{display:grid;place-items:center;padding:18px;background:#fff;border-radius:16px;border:1px solid var(--ln)}
+#qrbox canvas,#qrbox img{display:block}
+
+#toast{position:fixed;bottom:24px;left:50%;z-index:220;display:flex;align-items:center;gap:9px;padding:12px 18px;
+  border-radius:13px;font-weight:650;font-size:13.5px;pointer-events:none;background:var(--tx);color:var(--bg);
+  box-shadow:var(--s4);opacity:0;transform:translateX(-50%) translateY(22px);max-width:min(90vw,460px)}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0);transition:.26s cubic-bezier(.2,.9,.3,1.2)}
+#toast svg{width:15px;height:15px;flex:none}
+
+.sk{background:linear-gradient(90deg,var(--surf2),var(--surf3),var(--surf2));background-size:200% 100%;
+  animation:sh 1.3s linear infinite;border-radius:var(--rm);height:96px}
+@keyframes sh{to{background-position:-200% 0}}
+
+@media(max-width:900px){
+  .shell{grid-template-columns:1fr;padding:14px;gap:14px}
+  aside{position:static}
+  .rail{max-height:270px}
+  header{padding:10px 14px}
+  .sbox{order:9;width:100%;min-width:0}
+  .kb{display:none}
+  .hero{padding:18px}
+  .hero h1{font-size:22px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+}
+
+/* ── the single dashboard: hero + the channels it watches ─────────────────── */
+.dash{max-width:940px;margin:0 auto;padding:30px 22px 60px;display:flex;flex-direction:column;gap:26px}
+
+.hero-card{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--ln);
+  border-radius:var(--rl);box-shadow:var(--s2);padding:38px 34px 34px}
+.hero-card::before{content:"";position:absolute;inset:0 0 auto;height:3px;
+  background:linear-gradient(90deg,var(--a1),var(--a2),transparent)}
+.hero-card::after{content:"";position:absolute;top:-40%;right:-10%;width:340px;height:340px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--a2) 16%,transparent),transparent 68%);pointer-events:none}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:750;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tx2);margin-bottom:16px}
+.dot-live{width:8px;height:8px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 0 0 color-mix(in srgb,#22c55e 70%,transparent);animation:live 1.8s ease-out infinite}
+@keyframes live{0%{box-shadow:0 0 0 0 color-mix(in srgb,#22c55e 60%,transparent)}
+  100%{box-shadow:0 0 0 9px transparent}}
+.hero-h{margin:0;font-size:34px;line-height:1.12;font-weight:800;letter-spacing:-.02em;color:var(--tx)}
+.hero-p{margin:14px 0 0;max-width:60ch;font-size:15px;line-height:1.6;color:var(--tx2)}
+.hero-cta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:26px}
+.hero-when{font-size:13px;color:var(--tx3)}
+
+.channels-h,.ch-group-h{display:flex;align-items:center;gap:10px}
+.channels-h{font-size:13px;font-weight:750;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--tx2);margin-bottom:2px}
+.channels{display:flex;flex-direction:column;gap:22px}
+.ch-group{display:flex;flex-direction:column;gap:12px}
+.ch-group-h{font-size:13.5px;font-weight:700;color:var(--tx)}
+.ch-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+
+.ch-card{display:flex;align-items:center;gap:13px;padding:14px 15px;text-decoration:none;
+  background:var(--surf);border:1px solid var(--ln);border-radius:var(--rm);box-shadow:var(--s1);
+  transition:transform .16s,box-shadow .16s,border-color .16s}
+.ch-card:hover{transform:translateY(-2px);box-shadow:var(--s2);
+  border-color:color-mix(in srgb,var(--a1) 38%,var(--ln))}
+.ch-meta{display:flex;flex-direction:column;min-width:0;gap:2px;flex:1}
+.ch-name{font-size:14px;font-weight:700;color:var(--tx);line-height:1.2}
+.ch-handle{font-size:12.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-go{flex:none;color:var(--tx3);width:16px;height:16px;transition:color .16s,transform .16s}
+.ch-card:hover .ch-go{color:var(--a1);transform:translate(2px,-2px)}
+
+@media(max-width:560px){
+  .dash{padding:20px 15px 44px}
+  .hero-card{padding:28px 22px 26px}
+  .hero-h{font-size:26px}
+  .ch-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="aura"><i></i><i></i></div>
+
+<header>
+  <div class="brand"><span class="m"><i data-lucide="radio-tower"></i></span><span id="ttl">Aiko</span></div>
+  <div class="sp"></div>
+  <span class="sync" id="sync" title="Storage mode"><span class="d"></span><span class="lbl">…</span></span>
+  <button class="b g i" id="thm" title="Light / dark" data-fb="◐"><i data-lucide="sun-moon"></i></button>
+</header>
+
+<div id="app"><div class="dash"><div class="sk" style="height:150px"></div><div class="sk"></div><div class="sk"></div></div></div>
+
+<footer>
+  <strong style="color:var(--tx2)">SportsFC</strong> · daily channel check<br>
+  Did today's content reach every channel?
+</footer>
+
+<div class="veil" id="veil"><div class="mo" id="mo"></div></div>
+<div id="toast"></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ═══════════════════ optional libs (never fatal) ═══════════════════ */
+const G = () => window.gsap;
+const reduce = () => matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+function icons(root){
+  const l = window.lucide;
+  if(l && l.createIcons){ try{ l.createIcons({ root: root || document.body, attrs:{ "stroke-width":2 } }); return; }catch(e){} }
+  (root || document).querySelectorAll("[data-lucide]").forEach(el => {
+    if(el.dataset.fbd) return;
+    el.dataset.fbd = "1";
+    const host = el.closest("[data-fb]");
+    if(host){ host.textContent = host.dataset.fb; } else { el.remove(); }
+  });
+}
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(() => {
+    try{ if(document.fonts.check('1em "simple-icons"')) document.body.classList.add("si-ok"); }catch(e){}
+  });
+}
+/* Entrance animation.
+   Uses fromTo() with an explicit end state — never from(). A bare from() records
+   its end value at creation time, so calling it twice on the same element makes the
+   second tween animate 0 -> 0 and the content stays invisible for good.
+   clearProps also strips the inline styles afterwards, so nothing can be left stranded. */
+function anim(t, from){
+  const g = G();
+  if(!t || !g || reduce()) return;
+  try{
+    const els = typeof t === "string" ? document.querySelectorAll(t) : t;
+    if(!els || (els.length === 0 && !els.nodeType)) return;
+    g.killTweensOf(els);
+    g.set(els, { clearProps:"opacity,transform" });
+    const start = Object.assign({}, from);
+    const end = { opacity:1, x:0, y:0, scale:1, duration:.4, ease:"power3.out",
+                  overwrite:"auto", clearProps:"opacity,transform" };
+    ["duration","ease","stagger","delay"].forEach(k => {
+      if(start[k] !== undefined){ end[k] = start[k]; delete start[k]; }
+    });
+    g.fromTo(els, start, end);
+    // Safety net: visibility must never depend on the animation finishing.
+    // A backgrounded tab pauses requestAnimationFrame, which would otherwise leave
+    // content stuck at opacity 0. Stripping the inline styles reveals it regardless.
+    setTimeout(() => { try{ g.set(els, { clearProps:"opacity,transform" }); }catch(e){} }, 1600);
+  }catch(e){}
+}
+
+/* ═══════════════════ constants ═══════════════════ */
+const DEF_PLATFORMS = [
+  { id:"facebook",  name:"Facebook",        color:"#1877f2", icon:"si:facebook" },
+  { id:"instagram", name:"Instagram",       color:"#e1306c", icon:"si:instagram" },
+  { id:"x",         name:"X (Twitter)",     color:"#16181c", icon:"si:x" },
+  { id:"linkedin",  name:"LinkedIn",        color:"#0a66c2", icon:"si:linkedin" },
+  { id:"youtube",   name:"YouTube",         color:"#ff0033", icon:"si:youtube" },
+  { id:"tiktok",    name:"TikTok",          color:"#00b8c4", icon:"si:tiktok" },
+  { id:"threads",   name:"Threads",         color:"#3d3d3d", icon:"si:threads" },
+  { id:"pinterest", name:"Pinterest",       color:"#bd081c", icon:"si:pinterest" },
+  { id:"whatsapp",  name:"WhatsApp",        color:"#25d366", icon:"si:whatsapp" },
+  { id:"telegram",  name:"Telegram",        color:"#229ed9", icon:"si:telegram" },
+  { id:"viber",     name:"Viber",           color:"#7360f2", icon:"si:viber" },
+  { id:"snapchat",  name:"Snapchat",        color:"#c9a800", icon:"si:snapchat" },
+  { id:"reddit",    name:"Reddit",          color:"#ff4500", icon:"si:reddit" },
+  { id:"discord",   name:"Discord",         color:"#5865f2", icon:"si:discord" },
+  { id:"spotify",   name:"Spotify",         color:"#1db954", icon:"si:spotify" },
+  { id:"gbp",       name:"Google Business", color:"#34a853", icon:"lucide:store" },
+  { id:"other",     name:"Other channel",  color:"#64748b", icon:"lucide:at-sign" },
+];
+const THEMES = [
+  { a1:"#5b6bff", a2:"#a855f7" }, { a1:"#0ea5e9", a2:"#22d3ee" }, { a1:"#10b981", a2:"#84cc16" },
+  { a1:"#f43f5e", a2:"#f97316" }, { a1:"#f59e0b", a2:"#eab308" }, { a1:"#8b5cf6", a2:"#ec4899" },
+  { a1:"#334155", a2:"#64748b" },
+];
+/* HKEY is versioned: results cached before per-platform verification existed carry no `verified`
+   field, and treating a missing field as verified would keep showing the old false green on
+   social links until the hour-long cache expired. It is only a cache, so start it fresh. */
+const LKEY = "orghub.v1", HKEY = "orghub.health.v2", HTTL = 3600e3;
+
+const blank = () => ({
+  settings:{ title:"Aiko", a1:"#5b6bff", a2:"#a855f7", theme:"dark", passHash:null,
+             platforms:DEF_PLATFORMS.map(p => ({ ...p })) },
+  orgs:[]
+});
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
+
+/* ═══════════════════ the channels this dashboard watches ═══════════════════
+   Hardcoded on purpose. This is a single-team daily-check board, not a directory anyone edits from
+   the browser — so the channels live in code, reviewed and version-controlled, and a new one is
+   added here (a line below) rather than through an admin UI that could put a typo into production.
+   The daily check reads every one of these through the same pipeline as before; the report groups
+   them by language, so `lang` is what pairs the VN and EN sides of each drop. */
+const SPORTSFC = {
+  id: "sportsfc", name: "SportsFC",
+  socials: [
+    { id:"yt-vn",   platform:"youtube",   url:"https://youtube.com/@SportsFC-vn",   handle:"@SportsFC-vn",   note:"vietnamese" },
+    { id:"yt-fans", platform:"youtube",   url:"https://youtube.com/@sportsfc_fans", handle:"@sportsfc_fans", note:"english" },
+    { id:"tg-vn",   platform:"telegram",  url:"https://t.me/sportsfc_vn",           handle:"sportsfc_vn",    note:"vietnamese" },
+    { id:"tg-fans", platform:"telegram",  url:"https://t.me/sportsfc_fans",         handle:"sportsfc_fans",  note:"english" },
+    { id:"x-vn",    platform:"x",         url:"https://x.com/Sportsfcvn",           handle:"Sportsfcvn",     note:"vietnamese" },
+    { id:"fb-vn",   platform:"facebook",  url:"https://facebook.com/sportsfc.vn",   handle:"sportsfc.vn",    note:"vietnamese" },
+    { id:"fb-fans", platform:"facebook",  url:"https://facebook.com/Sportsfc.fans", handle:"Sportsfc.fans",  note:"english" },
+    { id:"ig-vn",   platform:"instagram", url:"https://instagram.com/sportsfc.vn",  handle:"sportsfc.vn",    note:"vietnamese" },
+    { id:"ig-fans", platform:"instagram", url:"https://instagram.com/sportsfc.fans",handle:"sportsfc.fans",  note:"english" },
+    { id:"vb-vn",   platform:"viber",     url:"https://invite.viber.com/?g2=AQBb1E9bG9aYOFaoK6NCZWomB5NyKXRWW9B%2B88qnMHECatqiPo6UvpuEjWAoMEHN", handle:"Sportsfc.vn",   note:"vietnamese" },
+    { id:"vb-fans", platform:"viber",     url:"https://invite.viber.com/?g2=AQBYisJhU5NX0laoK25C7uTANpWbuOE7yZ5xBjKrXwcjgcUIZdgXex9Sc%2Bi0Twir",       handle:"Sportsfc.fans", note:"english" },
+  ],
+  websites: [], tags: [],
+};
+
+/* ═══════════════════ state ═══════════════════ */
+let state = blank();
+let cloud = { mode:"local", configured:false, adminReady:false, updatedAt:null, saving:false, error:null };
+let unlocked = false, selected = null, query = "", booting = true;
+let health = {};                                        // url -> {ok,status,note,at}
+let checking = new Set();
+
+function normalize(d){
+  const b = blank();
+  const st = { settings:{ ...b.settings, ...((d && d.settings) || {}) },
+               orgs:(d && Array.isArray(d.orgs)) ? d.orgs : [] };
+  if(d && d.settings && d.settings.accent && !d.settings.a1){ st.settings.a1 = d.settings.accent; st.settings.a2 = d.settings.accent; }
+  /* one-time rename: saved settings from earlier versions still carry the old title */
+  if(["Org Hub", "Aiko Org Hub"].indexOf(st.settings.title) !== -1) st.settings.title = "Aiko";
+  st.settings.platforms = (st.settings.platforms || []).map(p => {
+    const def = DEF_PLATFORMS.find(x => x.id === p.id);
+    return { ...p, icon:p.icon || (def ? def.icon : "") };
+  });
+  if(!st.settings.platforms.length) st.settings.platforms = b.settings.platforms;
+  /* A platform added to DEF_PLATFORMS after someone already had settings saved would otherwise
+     never reach them — this only ever backfilled icons onto rows that were already there, so the
+     new entry existed in the code and nowhere in the app. Appended, never overwriting: a platform
+     the user renamed, recoloured or deliberately deleted keeps whatever they made of it. */
+  const seen = new Set(st.settings.platforms.map(p => p.id));
+  const removed = new Set(st.settings.removedPlatforms || []);
+  for(const d of DEF_PLATFORMS)
+    if(!seen.has(d.id) && !removed.has(d.id)) st.settings.platforms.push({ ...d });
+  st.orgs.forEach(o => { o.websites = o.websites || []; o.socials = o.socials || []; o.tags = o.tags || []; });
+  return st;
+}
+const readLocal  = () => { try{ return normalize(JSON.parse(localStorage.getItem(LKEY) || "null")); }catch(e){ return blank(); } };
+const writeLocal = () => { try{ localStorage.setItem(LKEY, JSON.stringify(state)); }catch(e){} };
+const adminKey   = () => sessionStorage.getItem("orghub.key") || "";
+
+try{ const h = JSON.parse(localStorage.getItem(HKEY) || "{}"); if(h && typeof h === "object") health = h; }catch(e){}
+const saveHealth = () => { try{ localStorage.setItem(HKEY, JSON.stringify(health)); }catch(e){} };
+
+/* ═══════════════════ cloud layer ═══════════════════ */
+async function pull(){
+  const r = await fetch("api/data", { cache:"no-store" });
+  const j = await r.json();
+  if(!j.ok) throw new Error(j.error || "read failed");
+  cloud.configured = !!j.configured;
+  cloud.adminReady = !!j.adminReady;
+  if(j.configured){
+    cloud.mode = "cloud"; cloud.updatedAt = j.updatedAt || null;
+    state = normalize(j.data);
+  }else{
+    cloud.mode = "local"; state = readLocal();
+  }
+}
+
+/* GET /api/data is public, so the row must never carry the local password hash —
+   an exposed hash of a reused password is brute-forceable offline. In cloud mode the
+   password lives only in the ADMIN_PASSWORD env var, so the hash is dead weight anyway. */
+function cloudPayload(){
+  const copy = { ...state, settings:{ ...state.settings } };
+  delete copy.settings.passHash;
+  return copy;
+}
+
+async function persist(){
+  if(cloud.mode !== "cloud"){ writeLocal(); return true; }
+  cloud.saving = true; cloud.error = null; paintSync();
+  try{
+    const r = await fetch("api/data", {
+      method:"PUT",
+      headers:{ "Content-Type":"application/json", "x-admin-key":adminKey() },
+      body:JSON.stringify({ data:cloudPayload(), baseUpdatedAt:cloud.updatedAt })
+    });
+    const j = await r.json().catch(() => ({}));
+    if(r.status === 409){
+      cloud.saving = false; paintSync();
+      const go = await confirmBox("Changed on another device",
+        "Someone saved a newer version of this data. Reload to get the latest — your unsaved change here will be lost.", false);
+      if(go){ await pull(); render(); }
+      return false;
+    }
+    if(r.status === 401){
+      cloud.saving = false; setUnlocked(false);
+      toast("Session expired — sign in again", "lock"); return false;
+    }
+    if(!r.ok || !j.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+    cloud.updatedAt = j.updatedAt || cloud.updatedAt;
+    cloud.saving = false; paintSync();
+    return true;
+  }catch(e){
+    cloud.saving = false; cloud.error = String(e.message || e); paintSync();
+    toast("Could not save: " + cloud.error, "triangle-alert");
+    return false;
+  }
+}
+/* every mutation goes through this */
+async function commit(msg, ic){
+  const ok = await persist();
+  render();
+  if(ok && msg) toast(msg, ic || "check");
+  return ok;
+}
+
+/* ═══════════════════ helpers ═══════════════════ */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const org = id => state.orgs.find(o => o.id === id);
+
+function safeUrl(u){
+  const s = String(u || "").trim();
+  if(!s) return "";
+  if(/^https?:\/\//i.test(s)) return s;
+  if(/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
+  return "https://" + s.replace(/^\/+/, "");
+}
+function hostOf(u){ try{ return new URL(safeUrl(u)).hostname; }catch(e){ return ""; } }
+function pretty(u){
+  try{ const x = new URL(safeUrl(u)); return (x.host.replace(/^www\./, "") + x.pathname).replace(/\/$/, ""); }
+  catch(e){ return String(u || ""); }
+}
+const platform = id => state.settings.platforms.find(p => p.id === id) ||
+  { id:"other", name:"Other channel", color:"#64748b", icon:"lucide:at-sign" };
+
+function initials(n){
+  const p = String(n || "?").trim().split(/\s+/).filter(Boolean);
+  return (((p[0] || "?")[0]) + ((p[1] || "")[0] || "")).toUpperCase();
+}
+
+function iconOf(spec, fallback){
+  const s = String(spec || "");
+  if(s.startsWith("si:"))     return `<span class="ini">${esc(fallback)}</span><i class="si si-${esc(s.slice(3))}"></i>`;
+  if(s.startsWith("lucide:")) return `<i data-lucide="${esc(s.slice(7))}"></i>`;
+  return `<span class="ini" style="display:block">${esc(fallback)}</span>`;
+}
+let tT;
+function toast(msg, ic){
+  const t = document.getElementById("toast");
+  t.innerHTML = `<i data-lucide="${esc(ic || "check")}"></i><span>${esc(msg)}</span>`;
+  icons(t); t.classList.add("on");
+  clearTimeout(tT); tT = setTimeout(() => t.classList.remove("on"), 2600);
+}
+function copy(txt, msg){
+  const done = () => toast(msg || "Copied", "copy");
+  if(navigator.clipboard && navigator.clipboard.writeText)
+    return navigator.clipboard.writeText(txt).then(done, fb);
+  fb();
+  function fb(){
+    const a = document.createElement("textarea");
+    a.value = txt; a.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(a); a.select();
+    try{ document.execCommand("copy"); done(); }catch(e){ toast("Copy failed", "triangle-alert"); }
+    a.remove();
+  }
+}
+const wireLogos = root => root.querySelectorAll(".lg img").forEach(img => {
+  img.addEventListener("error", () => { img.style.display = "none"; }, { once:true });
+  img.addEventListener("load", () => {
+    // favicon services return a 16px placeholder for unknown domains — keep the initials then
+    if(img.naturalWidth && img.naturalWidth <= 16) img.style.display = "none";
+    else { const fb = img.parentNode.querySelector(".fb"); if(fb) fb.style.display = "none"; }
+  }, { once:true });
+});
+
+/* ═══════════════════ modal ═══════════════════ */
+const veil = document.getElementById("veil"), mo = document.getElementById("mo");
+let onEsc = null, onVeil = null;
+
+function openModal(html, opt){
+  opt = opt || {};
+  mo.className = "mo" + (opt.wide ? " w" : "");
+  mo.innerHTML = html;
+  veil.classList.add("on");
+  icons(mo); wireLogos(mo);
+  anim(mo, { y:14, scale:.975, opacity:0, duration:.32, ease:"back.out(1.5)" });
+  mo.querySelectorAll("[data-close]").forEach(b => b.onclick = closeModal);
+  const form = mo.querySelector("form");
+  if(form && opt.onSubmit) form.onsubmit = e => { e.preventDefault(); opt.onSubmit(form); };
+  const sel = opt.focus === null ? null : (opt.focus || "input,select,textarea");
+  const f = sel && mo.querySelector(sel);
+  if(f) setTimeout(() => f.focus(), 60);
+  onEsc = onVeil = closeModal;
+}
+function closeModal(){ veil.classList.remove("on"); mo.innerHTML = ""; onEsc = onVeil = null; }
+veil.onclick = e => { if(e.target === veil && onVeil) onVeil(); };
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && onEsc) return onEsc();
+  if(e.key === "/" && !veil.classList.contains("on") && !/input|textarea|select/i.test(document.activeElement.tagName)){
+    e.preventDefault(); const q = document.getElementById("q"); if(q) q.focus();
+  }
+});
+const X = `<button class="b g i" data-close data-fb="X"><i data-lucide="x"></i></button>`;
+function showErr(m){
+  let el = mo.querySelector(".err");
+  if(!el){ el = document.createElement("div"); el.className = "err"; mo.querySelector(".mb").appendChild(el); }
+  el.textContent = m; el.classList.add("on"); anim(el, { y:-4, opacity:0, duration:.22 });
+}
+function confirmBox(title, body, danger){
+  danger = danger !== false;
+  return new Promise(res => {
+    openModal(`
+      <div class="mh"><h3><i data-lucide="${danger ? "triangle-alert" : "circle-help"}"></i>${esc(title)}</h3>${X}</div>
+      <div class="mb"><div style="color:var(--tx2);line-height:1.6">${body}</div></div>
+      <div class="mf"><button class="b" data-close>Cancel</button>
+        <button class="b ${danger ? "d" : "p"}" id="y">${danger ? "Yes, delete" : "Continue"}</button></div>`,
+      { focus:"#y" });
+    mo.querySelector("#y").onclick = () => { closeModal(); res(true); };
+    onEsc = onVeil = () => { closeModal(); res(false); };
+  });
+}
+
+/* ═══════════════════ admin ═══════════════════ */
+function setUnlocked(v){
+  unlocked = v;
+  if(!v) sessionStorage.removeItem("orghub.key");
+  sessionStorage.setItem("orghub.unlocked", v ? "1" : "0");
+  render();
+}
+
+/* ═══════════════════ daily check ═══════════════════
+   Answers one question: did today's content reach every channel?
+
+   Post data arrives from two places — api/collect for the channels a server can read (YouTube,
+   Telegram, X, and Viber via the phone forwarder), and the browser extension for Facebook and
+   Instagram (and X as a fallback, when a datacenter IP is refused what the browser's own IP can
+   still fetch). Both land in the same store.
+
+   That store lives in localStorage first, and — when cloud storage is configured — is mirrored to
+   a shared Supabase row (api/report) so a check run on one device is the same "today" every other
+   device sees. localStorage stays the fallback: an offline moment or an unconfigured deployment
+   loses nothing, the report is simply not shared until the cloud is back.
+
+   Runs accumulate. Each source returns only its most recent posts (Telegram ~20, YouTube 15,
+   Instagram ~12, X as few as 3 and rarely more than ~10), so merging on every run builds a
+   history none of them offer on their own. */
+const CKEY = "orghub.checks";
+const BRUN = "orghub.browserRun";       // handoff slot the extension writes into
+
+let checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:{}, confirms:{}, tz:7, win:15,
+               window:"today", date:null, maxPer:4, lastRun:null };
+try{
+  const c = JSON.parse(localStorage.getItem(CKEY) || "null");
+  if(c && typeof c === "object") checks = { ...checks, ...c };
+}catch(e){}
+let reportUpdatedAt = null;          // instant the shared report row was last stored (concurrency)
+let reportPushT = null;              // debounce handle for the cloud push
+
+/* localStorage FIRST, always — that is the copy that survives an offline moment or an unconfigured
+   deployment. Then, if cloud storage is on, share it so every other device sees the same report. */
+const saveChecks = () => {
+  try{ localStorage.setItem(CKEY, JSON.stringify(checks)); }catch(e){}
+  pushReport();
+};
+
+/* Boot-time read of the shared report: a check someone ran on another device becomes visible here.
+   Cloud is the source of truth for the shared fields; an empty cloud row leaves the local copy
+   untouched. Never fatal — a failure just means this browser shows what it already had. */
+async function pullReport(){
+  if(cloud.mode !== "cloud") return;
+  try{
+    const r = await fetch("api/report", { cache:"no-store" });
+    const j = await r.json();
+    if(j && j.ok && j.data && typeof j.data === "object"){
+      checks = { ...checks, ...j.data };
+      reportUpdatedAt = j.updatedAt || null;
+      saveLocalChecksOnly();                       // mirror the shared copy into localStorage too
+    }
+  }catch(e){ /* offline / not configured — the local copy stands */ }
+}
+const saveLocalChecksOnly = () => { try{ localStorage.setItem(CKEY, JSON.stringify(checks)); }catch(e){} };
+
+/* Share the report after a check. Debounced, so the burst of saveChecks() a single run fires
+   collapses into one write. Because localStorage already holds the copy, a failed push is silent:
+   the next save retries and the browser never loses anything. On a 409 another device ran the
+   check meanwhile — take theirs rather than clobber it. */
+function pushReport(){
+  if(cloud.mode !== "cloud") return;
+  clearTimeout(reportPushT);
+  reportPushT = setTimeout(async () => {
+    try{
+      const r = await fetch("api/report", {
+        method:"PUT",
+        headers:{ "Content-Type":"application/json", "x-admin-key":adminKey() },
+        body:JSON.stringify({ data:checks, baseUpdatedAt:reportUpdatedAt })
+      });
+      const j = await r.json().catch(() => ({}));
+      if(r.status === 409){ await pullReport(); render(); return; }
+      if(j && j.ok && j.updatedAt) reportUpdatedAt = j.updatedAt;
+    }catch(e){ /* stays in localStorage; the next save will try again */ }
+  }, 400);
+}
+
+function mergePosts(channelId, incoming){
+  const have = checks.posts[channelId] || [];
+  const seen = new Set(have.map(p => p.externalId));
+  const add = (incoming || []).filter(p => p.externalId && p.ts && !seen.has(p.externalId));
+  if(!add.length) return 0;
+  /* newest first, and capped so one busy channel cannot grow the store without bound */
+  checks.posts[channelId] = [...have, ...add]
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 400);
+  return add.length;
+}
+
+/* ── language ──────────────────────────────────────────────────────────────
+   Language lives in the channel's free-text note and is typo-prone ("chaina"), so match
+   loosely onto ISO codes — otherwise a misspelling silently splits a language group. */
+const LANGS = [["vi", /viet|\bvn\b|tiếng|tieng/i], ["th", /thai|\bth\b/i],
+               ["zh", /chin|chai|\bcn\b|中文|mandarin/i], ["en", /eng|\ben\b/i]];
+function normLang(s){
+  const t = String(s || "").trim();
+  if(!t) return "";
+  for(const [code, re] of LANGS) if(re.test(t)) return code;
+  return t.toLowerCase().slice(0, 12);
+}
+
+/* ── time ──────────────────────────────────────────────────────────────────
+   "Which day was this posted" has to be answered in one fixed zone, or the VN, TH and CN
+   channels drop the same content into different buckets. Default UTC+7 (ICT). */
+const contentDate = (ts, tz) => new Date(new Date(ts).getTime() + (tz || 0) * 3600e3)
+  .toISOString().slice(0, 10);
+const hhmm = (ts, tz) => new Date(new Date(ts).getTime() + (tz || 0) * 3600e3)
+  .toISOString().slice(11, 16);
+/* a span of minutes, said the way a person would say it */
+const fmtGap = m => m >= 1440 ? Math.round(m / 1440) + "d"
+  : m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + (m % 60) + "m" : "")
+  : m + "m";
+
+/* ── slots ─────────────────────────────────────────────────────────────────
+   The same reel lands on each channel a minute or two apart, while separate drops are hours
+   apart, so a new slot starts wherever the gap to the previous post exceeds the window.
+   Single-linkage rather than a fixed grid: a grid splits any slot that straddles a boundary. */
+function clusterSlots(posts, winMin){
+  const gap = (winMin || 15) * 60e3;
+  const sorted = [...posts].sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const out = [];
+  for(const p of sorted){
+    const last = out[out.length - 1];
+    if(last && new Date(p.ts) - new Date(last.last) <= gap){ last.posts.push(p); last.last = p.ts; }
+    else out.push({ first:p.ts, last:p.ts, posts:[p] });
+  }
+  return out;
+}
+
+/* ── language of a caption ──────────────────────────────────────────────────
+   Catches the mistake a count can never catch: the right number of posts, on the right channel,
+   in the wrong language. A Vietnamese reel on the English channel counts as delivered and reads
+   as healthy, so the caption has to be read.
+
+   Vietnamese is unusually easy to be sure about. đ ă ơ ư exist in no other Latin-script
+   language, so a single one settles it. Tone marks alone are not enough — "Andrés Iniesta" in an
+   English caption carries an acute accent, and counting that as Vietnamese would flag correct
+   posts. Verified against 40 real captions from both channels: 40 right, 0 wrong. */
+const VN_UNIQUE = /[đĐăĂơƠưƯ]/g;
+const VN_TONES = /[àáảãạầấẩẫậằắẳẵặèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/gi;
+const VN_WORDS = /\b(và|của|không|người|được|những|trong|cho|với|các|là|có|để|này|khi|một|đã|sẽ|từ|như|trận|xem|ngay|bóng|đá|cầu|thủ|huyền|thoại|miễn|phí|câu|lạc|bộ|hâm|mộ|nhất|rất|thể|sự|nghiệp|cuộc|tranh|luận|tuổi|tác|chỉ|con|số|đến|nên|bàn|thắng|mùa|giải|đấu|trường|thời|đại)\b/gi;
+const EN_WORDS = /\b(the|and|for|with|this|that|your|you|are|our|from|all|new|watch|now|free|club|fans|match|his|her|was|were|has|have|one|two|three|four|five|when|what|who|how|but|not|more|most|just|about|into|over|after|before|only|than|then|them|they|their|there|been|being|would|could|should|will|can|did|does|goal|goals|team|game|season|player|players|legend|legends|career|careers|era|eras|question|choice|generation|generations|icons?|nation|whole|another|different|same|stage|number|age)\b/gi;
+const RX_THAI = /[฀-๿]/;
+const RX_CJK = /[㐀-䶿一-鿿]/;
+const hits = (s, re) => (s.match(re) || []).length;
+
+function detectLang(text){
+  const t = String(text || "");
+  /* Drop URLs, hashtags and handles first. A short-link slug is not language, and hashtags are
+     usually written in English even on a Vietnamese post — leaving them in tilts every caption
+     toward English. */
+  const body = t.replace(/https?:\/\/\S+/g, " ").replace(/#[\wÀ-ỹ]+/g, " ")
+                .replace(/@[\w.]+/g, " ").trim();
+  if(body.replace(/[^A-Za-zÀ-ỹ฀-๿一-鿿]/g, "").length < 4)
+    return { lang:"", why:"too little text to tell" };
+
+  if(RX_THAI.test(body)) return { lang:"th", why:"Thai script" };
+  if(RX_CJK.test(body))  return { lang:"zh", why:"Chinese characters" };
+
+  const uniq = hits(body, VN_UNIQUE), tones = hits(body, VN_TONES);
+  const vnw = hits(body, VN_WORDS), enw = hits(body, EN_WORDS);
+
+  if(uniq >= 1) return { lang:"vi", why:`${uniq} Vietnamese-only letter${uniq === 1 ? "" : "s"}` };
+  if(vnw >= 1)  return { lang:"vi", why:`${vnw} Vietnamese word${vnw === 1 ? "" : "s"}` };
+  if(tones >= 4 && tones > enw) return { lang:"vi", why:`${tones} tone marks` };
+  if(enw >= 2)  return { lang:"en", why:`${enw} English words` };
+  if(tones >= 2 && enw === 0) return { lang:"vi", why:`${tones} tone marks, no English` };
+  return { lang:"", why:"no clear signal" };
+}
+
+/* ── matching on what a post said ────────────────────────────────────────
+   Facebook cannot be matched on time. Its HTML reaches back only a handful of posts and its
+   timestamps do not cover a whole day, so a drop it did receive looks missing purely because the
+   window was never fully read. What it does give reliably is the words.
+
+   So for Facebook the question becomes: does any of its captions say the same thing as this drop?
+   Compared within one language — the Vietnamese and English variants of a drop are different text
+   and must not match each other, or the language check would be meaningless.
+
+   Character trigrams, scored by containment rather than Jaccard, because Facebook clips long
+   captions and appends its own "see more": a truncated caption is a subset of the original, which
+   containment scores near 1 and Jaccard punishes. Measured on the real captions, a genuine match
+   scores 0.84–1.00 and an unrelated post from the same day 0.09–0.21, so the threshold sits in a
+   very wide gap rather than on a knife edge. */
+const CONTENT_MATCH = 0.6;
+
+function normText(s){
+  return String(s || "").toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[#@][\wÀ-ỹ]+/g, " ")
+    .replace(/(…|\.\.\.)?\s*(see more|xem thêm|more)\s*$/i, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+function trigrams(s){
+  const t = " " + normText(s).replace(/\s+/g, " ") + " ";
+  const g = new Set();
+  for(let i = 0; i + 3 <= t.length; i++) g.add(t.slice(i, i + 3));
+  return g;
+}
+function contentScore(a, b){
+  const A = trigrams(a), B = trigrams(b);
+  if(A.size < 4 || B.size < 4) return 0;
+  let inter = 0;
+  for(const g of A) if(B.has(g)) inter++;
+  return inter / Math.min(A.size, B.size);
+}
+/* which channels are judged on content instead of time. X is deliberately not here even though it
+   shares the "browser-hostile" reputation Facebook has — its collector reads a real per-post
+   timestamp out of the profile page's own schema.org microdata, so it gets genuine instants and
+   belongs on the timeline side, matched drop by drop like YouTube and Telegram, not on words. */
+const matchesByContent = c => c.platform === "facebook";
+/* Viber reaches us only as forwarded phone notifications: real per-post timestamps, but coverage
+   of the window that cannot be depended on (a killed listener, a collapsed "3 new messages"
+   bundle), and video posts that arrive as a bare "Video message" placeholder rather than a caption.
+   That is the same shape as Facebook — a notification proves a post was made, its silence proves
+   nothing — so Viber must never anchor a drop or accuse one of a miss. Unlike Facebook it does
+   carry instants, so it folds into a drop by TIME rather than by caption: a notification inside a
+   drop's window is a ✓, and no notification is "·" (not seen forwarded), never "✗". */
+const foldsByTime = c => c.platform === "viber";
+/* a caption is an object; runs before that stored bare strings */
+const capObj = t => (t && typeof t === "object" ? t : { text:String(t || "") });
+
+/* ── one piece of content, two clocks ──────────────────────────────────────
+   Clustering on time assumes the same content reaches every channel within minutes, which is
+   normally true and was true for three of this day's four drops. It is not always: one clip went
+   out on eight channels at 12:42 and on X at 14:43, two hours adrift. Single-linkage put that in
+   two slots, and the report then claimed five drops on a day four things were published — marking
+   X missing from the first, eight channels missing from the second, and pushing a Facebook page to
+   5/4 because its captions answered both halves. Every one of those was false.
+
+   So after clustering, fold together any two slots that are one drop arriving late. Two separate
+   tests must agree, because merging drops is a far stronger claim than matching a caption:
+
+     · the channel sets must be disjoint — a channel cannot be late to a drop it already made, so
+       any overlap means these are two real posts rather than one arriving twice. This alone is
+       what keeps a channel that genuinely posts the same thing twice from being quietly merged.
+     · the words and the identifying tokens must both match.
+
+   That second test needs more than the trigram score Facebook is matched on. These captions are
+   templated — "Liệu {team} có thể giành chiến thắng? … {n}% khả năng…" — so two entirely
+   different fixtures score as high as 0.84 against each other, well above the 0.6 caption
+   threshold; merging on that alone would collapse a whole day into one drop. What actually
+   separates them is the handful of tokens naming the fixture: the hashtags, the percentages, the
+   proper nouns. Measured across a full day of both channels, that signature scored 1.00 for every
+   same-content pair and at most 0.67 for every different one — a gap of 0.33 where the trigram
+   score alone leaves 0.12. Both must pass. */
+const DROP_MERGE = 0.8;
+
+function contentSig(s){
+  const t = String(s || "");
+  const out = new Set();
+  for(const m of t.match(/#[\wÀ-ỹ]+/g) || []) out.add("#" + m.slice(1).toLowerCase());
+  const bare = t.replace(/https?:\/\/\S+/g, " ");
+  for(const m of bare.match(/\d+(?:[.,]\d+)?/g) || []) out.add("n" + m.replace(",", "."));
+  for(const m of bare.replace(/#[\wÀ-ỹ]+/g, " ").match(/\b[A-ZÀ-Ỹ][\wÀ-ỹ]{2,}\b/g) || [])
+    out.add(m.toLowerCase());
+  return out;
+}
+function sigScore(a, b){
+  const A = contentSig(a), B = contentSig(b);
+  /* a thin signature cannot carry a merge — containment across two tokens is far too easy to
+     satisfy, and a wrong merge hides a real miss */
+  if(A.size < 3 || B.size < 3) return 0;
+  let inter = 0;
+  for(const g of A) if(B.has(g)) inter++;
+  return inter / Math.min(A.size, B.size);
+}
+
+/* is b the same drop as a, arriving late on channels a never had? */
+function sameDrop(a, b){
+  const seen = new Set(a.posts.map(p => p.channelId));
+  for(const p of b.posts) if(seen.has(p.channelId)) return false;
+  for(const pa of a.posts){
+    const ta = (pa.text || "").trim();
+    if(!ta) continue;
+    const la = detectLang(ta).lang;
+    if(!la) continue;                       // no language, no verdict — leave the slots apart
+    for(const pb of b.posts){
+      const tb = (pb.text || "").trim();
+      if(!tb || detectLang(tb).lang !== la) continue;
+      if(contentScore(ta, tb) >= CONTENT_MATCH && sigScore(ta, tb) >= DROP_MERGE) return true;
+    }
+  }
+  return false;
+}
+
+function mergeLate(slots){
+  const out = [];
+  /* clusterSlots hands these over oldest first, so anything absorbed is always the later half */
+  for(const s of slots){
+    const hit = out.find(o => sameDrop(o, s));
+    if(!hit){ out.push({ first:s.first, last:s.last, posts:s.posts.slice(), lateIds:[] }); continue; }
+    hit.posts = hit.posts.concat(s.posts);
+    /* Late means precisely "arrived in a time cluster of its own, well after this drop began" —
+       which is exactly what a merge absorbs, and nothing else. Measuring lateness against the
+       window instead would flag an ordinary slow fan-out: single-linkage lets one drop chain
+       across far more than the window, so nine channels three minutes apart would have had the
+       last of them accused of being late when nothing was wrong. */
+    for(const p of s.posts) if(hit.lateIds.indexOf(p.channelId) === -1) hit.lateIds.push(p.channelId);
+    if(new Date(s.first) < new Date(hit.first)) hit.first = s.first;
+    if(new Date(s.last)  > new Date(hit.last))  hit.last  = s.last;
+  }
+  return out.sort((a, b) => new Date(a.first) - new Date(b.first));
+}
+
+/**
+ * Reconcile one window — by default the last 24 hours, which is the question being asked.
+ *
+ * channels: [{ id, name, platform, lang }]
+ * opt:      { hours, win, tz, maxPerPeriod }
+ *
+ * Each channel lands in one of four modes, and the difference decides whether silence means
+ * failure or ignorance:
+ *   timeline  real per-post timestamps — matched drop by drop, language checked
+ *   content   captions but no dependable times (Facebook) — matched on what the post said
+ *   count     a number only — compared, not matched
+ *   none      nothing collected — reported unknown, never missing, because an uncollected
+ *             channel is not a failed post and conflating them buries the real gaps
+ */
+/* The window can be a rolling stretch of hours or one calendar day in the chosen zone. The
+   difference matters: at midday a rolling 24 h straddles two dates, so "how many went out today"
+   cannot be answered from it. A day runs from midnight in that zone, and never past now. */
+function windowBounds(opt){
+  const tz = opt.tz || 0;
+  if(opt.mode === "day" && opt.date){
+    const start = Date.parse(opt.date + "T00:00:00Z") - tz * 3600e3;
+    if(isFinite(start)) return { from:start, to:Math.min(start + 86400e3, Date.now()) };
+  }
+  const to = Date.now();
+  return { from:to - (opt.hours || 24) * 3600e3, to };
+}
+
+function reconcile(channels, opt){
+  const tz = opt.tz, win = opt.win;
+  const maxPer = opt.maxPerPeriod || 4;
+  const { from, to } = windowBounds(opt);
+  const hours = Math.max(1, Math.round((to - from) / 3600e3));
+  const inWindow = ts => { const t = new Date(ts).getTime(); return t >= from && t <= to + 60e3; };
+
+  /* posts inside the window, per channel */
+  const posts = {};
+  for(const c of channels)
+    posts[c.id] = (checks.posts[c.id] || []).filter(p => p.ts && inWindow(p.ts));
+
+  /* Count-only data is filed per content date. Pull in any date the window touches — a 24 h
+     window straddles two of them for all but one instant of the day. */
+  const dates = new Set([contentDate(new Date(from).toISOString(), tz),
+                         contentDate(new Date(to).toISOString(), tz)]);
+  const countFor = id => {
+    for(const d of dates){
+      const e = ((checks.counts || {})[d] || {})[id];
+      if(e && e.n !== "" && e.n != null) return e;
+    }
+    return null;
+  };
+
+  const bagOf = c => ((checks.captions || {})[c.id] || []).map(capObj);
+
+  /* ── channels only a person can answer for ──────────────────────────────
+     Viber is the case. It has no public post list, no web client for the extension, and an
+     encrypted desktop store — every way of reading it is shut, and no amount of trying changes
+     that. The choice is therefore between leaving the channel blank forever and letting the one
+     source that does know answer: the person looking at the report, who has Viber on their phone.
+
+     So its cells are tickable. A tick is stored against the drop it belongs to, which is what
+     makes this worth more than a number typed into a box — it says *which* content reached the
+     channel, drop by drop, exactly like every other row in the matrix. It stays visually distinct
+     throughout, because a person's word and a measurement are different kinds of fact and this
+     report has never pretended otherwise. */
+  const confirmOf = (id, at) => ((checks.confirms || {})[id] || {})[at];
+  const confirmsFor = id => Object.values((checks.confirms || {})[id] || {});
+  /* Offered only where reading genuinely failed, never as a shortcut around a channel that can be
+     read — a tick beside a collector that merely had a bad morning would paper over the outage
+     this report exists to surface. */
+  const canConfirm = c => !posts[c.id].length && !bagOf(c).length && !countFor(c.id);
+
+  /* A content-matched channel is never fallen back to timeline matching, even when it does have
+     timestamps. Facebook's timestamps are real for the posts it hands over, but its coverage of a
+     window is not — so they can prove a post was made and can never prove one was not. Matching
+     on them produced exactly that false alarm: two Pages reported a missing drop that was sitting
+     on both of them. With no captions to judge by, the honest answer is that we do not know. */
+  /* "confirm" sits last: anything actually collected outranks a hand-tick, so a channel that
+     starts reporting for itself is never held back by an old one. */
+  const modeOf = c => matchesByContent(c)
+    ? (bagOf(c).length ? "content" : (countFor(c.id) ? "count"
+       : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")))
+    : foldsByTime(c)
+    ? (posts[c.id].length ? "timefold" : (countFor(c.id) ? "count"
+       : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")))
+    : (posts[c.id].length ? "timeline" : (countFor(c.id) ? "count"
+       : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")));
+  const countOf = c => {
+    const m = modeOf(c);
+    if(m === "count") return Number(countFor(c.id).n);
+    if(m === "confirm") return slots.filter(s => confirmOf(c.id, s.at) === true).length;
+    return posts[c.id].length;
+  };
+
+  /* slots: the same drop reaching each channel a minute or two apart — then any drop that reached
+     one of them hours later folded back in, so a late post reads as late rather than as missing */
+  /* A channel judged on content contributes its captions, not its clock. Facebook hands over
+     posts carrying a real instant but, whenever its payload cannot pair text to timestamps, no
+     words at all — and a timestamped, textless post opened a drop of its own that nothing else
+     could ever be part of. Every other channel then showed a cross against it: one Page's stray
+     post invented a drop and accused eight healthy channels of missing it.
+
+     That is the same false alarm content matching exists to prevent, arriving through a different
+     door. Its timestamps were already declared unable to prove absence — so they must not be
+     allowed to define what everyone else is measured against either. Content channels are folded
+     back into the drops they match, by caption, further down. */
+  const all = [];
+  for(const c of channels){
+    if(matchesByContent(c) || foldsByTime(c)) continue;
+    for(const p of posts[c.id]) all.push({ ...p, channelId:c.id });
+  }
+  const timeline = channels.filter(c => modeOf(c) === "timeline");
+  const slots = mergeLate(clusterSlots(all, win)).map(s => {
+    const present = [...new Set(s.posts.map(p => p.channelId))];
+    return {
+      at:s.first, time:hhmm(s.first, tz),
+      day:contentDate(s.first, tz),
+      present, posts:s.posts,
+      missing:timeline.filter(c => present.indexOf(c.id) === -1).map(c => c.id),
+      /* the channels the merge pulled back in, and how far behind they were — the lateness is the
+         useful half of what folding the slots together would otherwise hide */
+      late:(s.lateIds || []).map(id => {
+        const p = s.posts.find(q => q.channelId === id);
+        return { id, mins:Math.round((new Date(p.ts) - new Date(s.first)) / 60e3) };
+      }).filter(l => l.mins > 0),
+      kinds:[...new Set(s.posts.map(p => p.kind))],
+    };
+  });
+
+  /* Only measured evidence sets the target. A suggestion read off a Facebook page may be wrong
+     about itself; it must not be able to be wrong about every other channel. */
+  const evidence = channels.filter(c => {
+    const m = modeOf(c);
+    return m === "timeline" || (m === "count" && countFor(c.id).source !== "suggested");
+  });
+  /* Content-matched channels are deliberately not evidence for the target. They can only ever
+     account for drops that some other channel already established, so they can confirm a drop
+     but never reveal one — using them would make the target circular.
+
+     Hand-ticked channels are left out for exactly the same reason, and it is not a judgement on
+     whether a person is trustworthy: a tick is answered against a drop that already exists, so it
+     is structurally incapable of revealing one. A Viber post that went out on a day nothing else
+     did would leave no drop to tick, which is a real limit and the honest place to admit it. */
+  const expected = evidence.length ? evidence.reduce((m, c) => Math.max(m, countOf(c)), 0) : null;
+
+  /* the caption a drop should have on a channel of this language, for content matching */
+  const refFor = (slot, lang) => {
+    const texted = slot.posts.filter(p => (p.text || "").trim());
+    const same = texted.find(p => detectLang(p.text).lang === lang);
+    return same ? same.text : "";
+  };
+
+  const alerts = [];
+  const rows = channels.map(c => {
+    const mode = modeOf(c);
+    const meta = checks.meta[c.id] || {};
+    const bag = bagOf(c);
+
+    /* one cell per drop, so the matrix can be read straight across a row */
+    let cells;
+    if(mode === "content"){
+      /* Matched on words, not time. Only ever against a reference in this channel's own language:
+         a drop's Vietnamese and English variants are different text, and letting them match each
+         other would make the language check meaningless.
+
+         One caption accounts for at most one drop. Scoring each drop independently let a single
+         caption satisfy two of them whenever a day's posts were worded alike — the channel would
+         read 2/2 having posted once, and a real miss would pass unnoticed. So: score every pairing,
+         take them best-first, and never reuse a caption or fill a drop twice. */
+      const pairs = [];
+      slots.forEach((s, i) => {
+        const ref = refFor(s, c.lang);
+        if(!ref) return;
+        bag.forEach((cap, j) => {
+          const sc = contentScore(ref, cap.text);
+          if(sc >= CONTENT_MATCH) pairs.push({ i, j, sc });
+        });
+      });
+      pairs.sort((a, b) => b.sc - a.sc);
+      const taken = new Map(), usedCap = new Set();
+      for(const p of pairs){
+        if(taken.has(p.i) || usedCap.has(p.j)) continue;
+        taken.set(p.i, { cap:bag[p.j], score:p.sc });
+        usedCap.add(p.j);
+      }
+      cells = slots.map((s, i) => {
+        const ref = refFor(s, c.lang);
+        if(!ref) return { state:"none", post:null, why:"no same-language caption to compare with" };
+        const hit = taken.get(i);
+        if(hit) return { state:"okc", score:hit.score, post:Object.assign({ ts:null }, hit.cap) };
+        /* the closest any caption came, so a miss carries its own evidence */
+        let best = 0;
+        for(const cap of bag){ const sc = contentScore(ref, cap.text); if(sc > best) best = sc; }
+        return { state:"miss", score:best };
+      });
+    }else if(mode === "timeline"){
+      cells = slots.map(s => {
+        const mine = s.posts.filter(p => p.channelId === c.id);
+        if(!mine.length) return { state:"miss", post:null };
+        const bad = mine.find(p => {
+          const d = detectLang(p.text);
+          return c.lang && d.lang && d.lang !== c.lang;
+        });
+        /* the drop did arrive here, hours after the rest. Carried onto the cell so the matrix can
+           say so on its own — otherwise the summary shows a plain tick and only the drops tab
+           knows the post was two hours behind everybody else. */
+        const l = (s.late || []).find(x => x.id === c.id);
+        return bad ? { state:"lang", post:bad, detected:detectLang(bad.text) }
+                   : { state:"ok", post:mine[0], extra:mine.length - 1,
+                       lateBy:l ? l.mins : null };
+      });
+    }else if(mode === "timefold"){
+      /* Content goes out to every channel together, and Viber cannot be read on its own — the only
+         automatic signal is a forwarded phone notification, which is unreliable (a killed listener,
+         a "Video message" placeholder with no caption). So every real drop is ASSUMED to have
+         reached Viber (a dashed ✓), and UPGRADED to a firm ✓ when a notification actually lands in
+         its window. Never a ✗ and never a phantom drop: a Viber miss cannot be proven from here, so
+         it is never invented, and a lone stray notification never becomes a drop of its own. */
+      const mine = posts[c.id] || [];
+      cells = slots.map(s => {
+        const start = new Date(s.at).getTime();
+        const end = s.posts.reduce((m, p) => Math.max(m, new Date(p.ts).getTime()), start);
+        const lo = start - win * 60e3, hi = end + win * 60e3;
+        const hit = mine.find(p => { const t = new Date(p.ts).getTime(); return t >= lo && t <= hi; });
+        return hit ? { state:"ok", post:hit } : { state:"asm", post:null };
+      });
+    }else{
+      /* Nothing collected. For a channel a person can still answer for, each drop carries whatever
+         they ticked — yes, no, or not yet looked at — rather than a blank the report can do
+         nothing with. `askable` is what turns the cell into a control in the matrix. */
+      const askable = canConfirm(c);
+      cells = slots.map(s => {
+        const v = confirmOf(c.id, s.at);
+        if(v === true)  return { state:"okh", post:null, at:s.at, askable };
+        if(v === false) return { state:"miss", post:null, byHand:true, at:s.at, askable };
+        return { state:"none", post:null, at:s.at, askable };
+      });
+    }
+
+    /* a content-matched channel's count is how many drops its captions accounted for; a
+       time-folded one (Viber), how many drops a notification landed inside */
+    const n = mode === "content" ? cells.filter(x => x.state === "okc").length
+            : mode === "timefold" ? cells.filter(x => x.state === "ok" || x.state === "asm").length
+            : countOf(c);
+
+    /* Language is checkable wherever there are words, whether or not the times are usable. */
+    const langIssues = !c.lang ? []
+      : mode === "timeline"
+        ? posts[c.id].map(p => ({ post:p, d:detectLang(p.text) }))
+            .filter(x => x.d.lang && x.d.lang !== c.lang)
+        : mode === "content"
+          ? bag.map(cap => ({ post:Object.assign({ ts:null }, cap), d:detectLang(cap.text) }))
+              .filter(x => x.d.lang && x.d.lang !== c.lang)
+        : mode === "count"
+          ? (countFor(c.id).texts || []).map(t => ({ post:{ ts:null, text:t }, d:detectLang(t) }))
+              .filter(x => x.d.lang && x.d.lang !== c.lang)
+          : [];
+
+    /* Sources differ wildly in how far back they reach: Telegram hands over about twenty posts
+       and YouTube fifteen, which span days, X as few as three and rarely more than about ten,
+       while Facebook's page embeds only a handful. If a channel's oldest known post is itself
+       inside the window, the window was never covered end to end — so a short count might mean
+       nothing was posted, or might mean we never looked that far. Say which, rather than raising
+       a missing-post alarm on a guess. */
+    const all = checks.posts[c.id] || [];
+    const oldest = all.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity);
+    /* content matching sidesteps this entirely — it never depended on covering the window */
+    const partial = mode === "timeline" && all.length > 0 && oldest > from;
+
+    /* Viber (timefold) reports positive evidence only: it is never "short" or "over", because its
+       silence is not a miss and it does not set anyone's target. "seen" means it landed in at least
+       one drop; "unknown" means nothing was forwarded at all. Neither raises a problem. */
+    const status = mode === "none" ? "unknown"
+      : mode === "timefold" ? (n ? "seen" : "unknown")
+      : expected === null ? "notarget"
+      : n === expected ? "ok" : n < expected ? "short" : "over";
+
+    const missedAt = slots.filter(s => s.missing.indexOf(c.id) !== -1).map(s => s.time);
+
+    /* The gap is still reported as a gap — downgrading it would hide real misses, which is the
+       whole point of the tool. The caveat rides along instead, so the reader knows whether the
+       window was actually covered end to end before acting on it. */
+    if(status === "short")
+      alerts.push({ kind:"missing", id:c.id, name:c.name, partial,
+        text:`${expected - n} post${expected - n === 1 ? "" : "s"} missing` +
+             (missedAt.length ? ` — nothing at ${missedAt.join(", ")}` : "") +
+             (partial ? ` · only ${all.length} post(s) could be read here and none predate the ` +
+                        `window, so part of it was never seen` : "") });
+    if(mode !== "none" && !foldsByTime(c) && n > maxPer)
+      alerts.push({ kind:"over", id:c.id, name:c.name,
+        text:`${n} posts in ${hours}h — over the ${maxPer} you would expect at most` });
+    for(const x of langIssues)
+      alerts.push({ kind:"lang", id:c.id, name:c.name,
+        /* count-only channels carry captions but no instant, so there is no time to name */
+        text:(x.post.ts ? hhmm(x.post.ts, tz) + " post" : "a post") +
+             ` looks ${x.d.lang.toUpperCase()} on a ${c.lang.toUpperCase()} channel (${x.d.why})`,
+        post:x.post });
+    if(meta.dead)
+      alerts.push({ kind:"dead", id:c.id, name:c.name, text:"channel not found — fix the link" });
+
+    return { id:c.id, name:c.name, platform:c.platform, lang:c.lang, mode,
+             count:n, expected, status, cells, langIssues, missedAt, partial,
+             suggested: mode === "count" && countFor(c.id).source === "suggested" };
+  });
+
+  /* A drop's present/missing lists are built from timestamps, so a content-matched channel never
+     appeared in either — the matrix said Facebook got both drops while the drop itself reported
+     four channels out of six, and both could not be true. Fold the content verdicts back in now
+     that they are known. Kept separate as `byContent` so the report can still say which channels
+     were confirmed by caption rather than by time. */
+  for(const r of rows){
+    /* Viber (timefold) folds in the same way, by time instead of caption: a drop it landed in is
+       marked present, but it is NEVER added to `missing` — its silence is not a miss. That is what
+       keeps a Viber-only notification from ever inventing a drop or crossing out healthy channels. */
+    if(r.mode === "timefold"){
+      r.cells.forEach((cell, i) => {
+        const s = slots[i];
+        if(s && (cell.state === "ok" || cell.state === "asm") && s.present.indexOf(r.id) === -1)
+          s.present.push(r.id);
+      });
+      continue;
+    }
+    if(r.mode !== "content") continue;
+    r.cells.forEach((cell, i) => {
+      const s = slots[i];
+      if(!s) return;
+      if(cell.state === "okc"){
+        if(s.present.indexOf(r.id) === -1) s.present.push(r.id);
+        (s.byContent = s.byContent || []).push(r.id);
+      }else if(cell.state === "miss" && s.missing.indexOf(r.id) === -1){
+        s.missing.push(r.id);
+      }
+    });
+  }
+
+  /* A drop that reached a channel hours after the rest is not a miss, but it is not nothing
+     either — it is the one thing merging the slots would otherwise bury. Raised once per late
+     channel per drop, after the rows exist so it can be named properly. */
+  const nameOfCh = id => (channels.find(c => c.id === id) || {}).name || id;
+  for(const s of slots)
+    for(const l of (s.late || []))
+      alerts.push({ kind:"late", id:l.id, name:nameOfCh(l.id),
+        text:`the ${s.time} drop landed here at ${hhmm(s.posts.find(p => p.channelId === l.id).ts, tz)}` +
+             ` — ${fmtGap(l.mins)} behind the rest` });
+
+  const langs = [...new Set(rows.map(r => r.lang || "—"))].sort();
+  const order = { dead:0, lang:1, missing:2, over:3, late:4, maybe:5 };
+  alerts.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+
+  return { from:new Date(from).toISOString(), to:new Date(to).toISOString(),
+    hours, tz, win, maxPer, expected, slots, rows, langs, alerts,
+    sum:{ ok:rows.filter(r => r.status === "ok").length,
+          short:rows.filter(r => r.status === "short").length,
+          over:rows.filter(r => r.status === "over").length,
+          notarget:rows.filter(r => r.status === "notarget").length,
+          unknown:rows.filter(r => r.status === "unknown").length } };
+}
+/* ── collection ─────────────────────────────────────────────────────────── */
+
+/* The report is useless without this. An org with four Facebook Pages and two Telegram channels
+   produces "MISSING: Telegram, Telegram" if rows are labelled by platform alone — true, and no
+   help at all. The handle field is optional in the directory (the tiles fall back to the URL), so
+   fall back the same way here and pull the identifier out of the path. */
+function chanLabel(s){
+  if(s.handle && s.handle.trim()) return s.handle.trim();
+  const u = safeUrl(s.url);
+  let p = "";
+  try{ p = new URL(u).pathname.replace(/^\/+|\/+$/g, ""); }catch(e){}
+  p = p.replace(/^s\//, "");                            // t.me/s/<channel>
+  const seg = p.split("/").filter(Boolean).pop();
+  return seg || pretty(u) || "(no handle)";
+}
+
+function dcChannels(o){
+  return o.socials.map(s => ({
+    id:s.id, platform:s.platform, lang:normLang(s.note),
+    name:platform(s.platform).name + " · " + chanLabel(s),
+    url:safeUrl(s.url), handle:s.handle || "",
+    ytChannelId:checks.ytIds[s.id] || undefined,
+  }));
+}
+
+async function collectServer(o){
+  if(!location.protocol.startsWith("http"))
+    return toast("Collecting needs the server — run npx vercel dev", "info");
+
+  const chans = dcChannels(o);
+  toast(`Collecting ${chans.length} channel(s)…`, "loader");
+  try{
+    const r = await fetch("api/collect", { method:"POST", headers:{ "Content-Type":"application/json" },
+      /* Always pull a little wider than the window on screen. The report can be widened to 7
+         days without re-collecting, and a post right on the boundary should not vanish because
+         the fetch stopped at exactly 24 h. */
+      body:JSON.stringify({ channels:chans, hours:192 }) });
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.error || "collect failed");
+
+    let added = 0, ok = 0, browser = 0;
+    for(const res of j.results){
+      checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
+        browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
+        dead:!!res.dead, at:Date.now() };
+      if(res.resolved && res.resolved.ytChannelId) checks.ytIds[res.channelId] = res.resolved.ytChannelId;
+      if(res.ok){ ok++; added += mergePosts(res.channelId, res.posts); }
+      else if(res.browserRequired) browser++;
+    }
+    checks.lastRun = j.collectedAt;
+    saveChecks();
+    toast(`${ok} channel(s) read, ${added} new post(s)` + (browser ? ` · ${browser} need the extension` : ""),
+          ok ? "check-check" : "triangle-alert");
+    return true;
+  }catch(e){
+    toast("Could not collect: " + (e.message || e), "triangle-alert");
+    return false;
+  }
+}
+
+/* ── the browser half ────────────────────────────────────────────────────
+   The extension reaches the dashboard two ways, and both end up here:
+     · its popup writes a run into localStorage on this origin, which absorbBrowserRun picks up
+     · its bridge content script answers a request from this page, which hands the run over
+       directly — that is what lets one button run both halves instead of two
+   No write endpoint and no admin key are involved either way. */
+
+let extReady = false;                       // set when the bridge announces itself
+const extWaiters = new Map();               // request id -> resolve
+let extSeq = 0;
+
+addEventListener("message", ev => {
+  if(ev.source !== window) return;
+  const m = ev.data;
+  if(!m || typeof m !== "object") return;
+  if(m.__aiko === "ready"){ extReady = true; return; }
+  if(m.__aiko === "progress"){ if(m.text) toast(m.text, "loader"); return; }
+  if(m.__aiko === "result"){
+    const done = extWaiters.get(m.id);
+    if(done){ extWaiters.delete(m.id); done(m); }
+  }
+});
+/* the bridge may have loaded before this listener existed, so ask */
+try{ postMessage({ __aiko:"request", action:"ping" }, location.origin); }catch(e){}
+
+function askExtension(channels, timeoutMs){
+  return new Promise(resolve => {
+    const id = "r" + (++extSeq);
+    const timer = setTimeout(() => {
+      extWaiters.delete(id);
+      resolve({ ok:false, error:"the extension did not answer in time" });
+    }, timeoutMs || 180000);
+    extWaiters.set(id, m => { clearTimeout(timer); resolve(m); });
+    postMessage({ __aiko:"request", action:"collect", id, channels }, location.origin);
+  });
+}
+
+function absorbBrowserRun(){
+  let run = null;
+  try{ run = JSON.parse(localStorage.getItem(BRUN) || "null"); }catch(e){}
+  if(!run || !Array.isArray(run.results)) return 0;
+  localStorage.removeItem(BRUN);
+  return absorbRun(run);
+}
+
+function absorbRun(run){
+  if(!run || !Array.isArray(run.results)) return 0;
+  let added = 0, counted = 0;
+  const today = contentDate(run.collectedAt || new Date().toISOString(), checks.tz);
+  for(const res of run.results){
+    checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
+      dead:!!res.dead, suggested:!!res.suggested, at:Date.now(),
+      /* what each Facebook route answered — the only way to work out a failure from a pasted
+         report, since none of those routes can be reached from outside this browser */
+      routeLog:res.routeLog || null };
+    /* Captions are kept whether or not the timestamps were usable — Facebook is matched on what
+       its posts said, so the bag is the useful part and arrives even when the dates do not. */
+    if(res.captions && res.captions.length){
+      /* Captions arrive as objects carrying the banner and whatever else the post gave up, but
+         older runs stored plain strings — accept both, and let a later run fill in fields an
+         earlier one lacked rather than replacing what is already known. */
+      const have = (checks.captions[res.channelId] || []).map(capObj);
+      const byKey = new Map(have.map(c => [normText(c.text), c]));
+      for(const raw of res.captions){
+        const c = capObj(raw);
+        if(!c.text) continue;
+        const k = normText(c.text);
+        const had = byKey.get(k);
+        if(!had) byKey.set(k, c);
+        else for(const f in c) if(c[f] && !had[f]) had[f] = c[f];
+      }
+      checks.captions[res.channelId] = [...byKey.values()].slice(0, 60);
+    }
+
+    if(res.posts && res.posts.length){ added += mergePosts(res.channelId, res.posts); }
+    else if(res.ok && typeof res.todayCount === "number"){
+      /* Facebook prints a relative time per post rather than an instant, so the extension
+         classifies today against not-today and sends the today count. Filed against the run's
+         own day and flagged suggested, which keeps it out of the expected-count inference until
+         it is confirmed. A run that could not read most of the dates sends nothing at all —
+         a blank asking to be filled is better than a number that looks measured. */
+      /* A page that never finished loading has nothing to say. Filing its zero would put
+         "0/2 — 2 posts missing" against a channel nobody has actually looked at, which is the one
+         kind of wrong this report must never be. Same for a page whose dates could not be read. */
+      const unreadable = res.stillLoading ||
+        res.unknownCount > res.todayCount + (res.visibleCount - res.todayCount - res.unknownCount);
+      if(!unreadable){
+        checks.counts[today] = checks.counts[today] || {};
+        const prev = checks.counts[today][res.channelId];
+        if(!prev || prev.source === "suggested"){
+          /* Facebook gives no timestamp to match a drop against, but it does give the words —
+             so the language check still works even where slot matching cannot. */
+          checks.counts[today][res.channelId] = { n:res.todayCount, source:"suggested",
+                                                  texts:(res.todayTexts || []).slice(0, 12) };
+          counted++;
+        }
+      }
+    }
+  }
+  checks.lastRun = run.collectedAt || checks.lastRun;
+  saveChecks();
+  if(added || counted) toast(`Extension: ${added} post(s), ${counted} suggested count(s)`, "chrome");
+  return added + counted;
+}
+
+/* One press for both halves — the server for YouTube, Telegram and X, the extension for Facebook
+   and Instagram. Only the open organization's channels are sent, so a directory with several orgs
+   never has the wrong pages opened. Falls back gracefully: if the extension is not installed the
+   server half still runs and the report says which channels are still waiting. */
+async function runEverything(o){
+  await collectServer(o);
+
+  /* anything the popup left behind still counts */
+  absorbBrowserRun();
+
+  /* Facebook and Instagram always need the extension. X only falls back to it when the server could
+     not read it — X serves its profile microdata to a home IP but can refuse a datacenter one, so a
+     Vercel deployment may fail server-side while the browser, on the user's own IP, still gets it.
+     A server X success (meta.ok) is left alone, so a healthy run never opens X twice. */
+  const xFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
+  const browserChans = dcChannels(o)
+    .filter(c => c.platform === "facebook" || c.platform === "instagram"
+              || (c.platform === "x" && xFailed(c.id)))
+    .map(c => ({ id:c.id, platform:c.platform, url:c.url,
+                 handle:(c.handle || "").replace(/^@/, "").trim(),
+                 username:(c.handle || "").replace(/^@/, "").trim() || chanLabelFromUrl(c.url) }));
+
+  if(!browserChans.length) return;
+
+  /* The bridge is injected at document_idle, so it can still be arriving when the modal opens.
+     Ping and give it a moment before concluding it is not installed. */
+  if(!extReady){
+    postMessage({ __aiko:"request", action:"ping" }, location.origin);
+    await new Promise(r => setTimeout(r, 700));
+  }
+  if(!extReady){
+    const kinds = [...new Set(browserChans.map(c => platform(c.platform).name))].join(", ");
+    toast(`Extension not detected — ${kinds} ${browserChans.length === 1 ? "was" : "were"} skipped`, "triangle-alert");
+    return;
+  }
+
+  toast(`Asking the extension for ${browserChans.length} channel(s)…`, "loader");
+  const res = await askExtension(browserChans);
+  if(!res.ok){
+    toast("Extension: " + (res.error || "failed"), "triangle-alert");
+    return;
+  }
+  absorbRun(res.run);
+}
+
+/* the username the platform knows this channel by, from its URL */
+function chanLabelFromUrl(u){
+  let p = "";
+  try{ p = new URL(safeUrl(u)).pathname.replace(/^\/+|\/+$/g, ""); }catch(e){}
+  return (p.split("/")[0] || "").replace(/^@/, "");
+}
+
+/* ── report UI ──────────────────────────────────────────────────────────── */
+const TZS = [[0, "UTC"], [7, "UTC+7 · Vietnam / Thailand"], [8, "UTC+8 · China"], [5.5, "UTC+5:30 · India"]];
+/* Calendar days first, because "how many went out today" is the question actually being asked and
+   a rolling 24 h cannot answer it — at midday it straddles two dates. The rolling spans stay for
+   looking across a boundary. */
+const WINDOWS = [["today", "today"], ["yesterday", "yesterday"], ["date", "pick a date…"],
+                 ["24", "last 24 hours"], ["48", "last 48 hours"], ["168", "last 7 days"]];
+
+/* the selector's value turned into what reconcile needs */
+function windowOpt(){
+  const w = String(checks.window || "today");
+  const tz = Number(checks.tz) || 0;
+  if(w === "today")     return { mode:"day", date:contentDate(new Date().toISOString(), tz) };
+  if(w === "yesterday") return { mode:"day", date:contentDate(new Date(Date.now() - 86400e3).toISOString(), tz) };
+  if(w === "date")      return { mode:"day", date:checks.date || contentDate(new Date().toISOString(), tz) };
+  return { mode:"roll", hours:Number(w) || 24 };
+}
+const tzLabel = tz => (TZS.find(t => t[0] === Number(tz)) || [0, "UTC+" + tz])[1];
+
+/* A finished day covers all of it; one still running stops at now. Saying "00:00–00:00" for the
+   first reads as an empty window. */
+function dayRange(rep){
+  const spanH = (new Date(rep.to) - new Date(rep.from)) / 3600e3;
+  return spanH >= 23.9 ? "the whole day"
+    : `00:00–${hhmm(rep.to, rep.tz)} so far`;
+}
+const fmtWhen = (iso, tz) => contentDate(iso, tz) + " " + hhmm(iso, tz);
+const hhmmss = (iso, tz) => new Date(new Date(iso).getTime() + (tz || 0) * 3600e3)
+  .toISOString().slice(11, 19);
+
+const CELL = {
+  ok:   { g:"✓", cls:"ok",   t:"posted" },
+  /* matched on what the caption said rather than when it appeared — marked apart so a content
+     match is never mistaken for a timed one */
+  okc:  { g:"≈", cls:"okc",  t:"the same content is on this channel, matched by caption" },
+  /* ticked by a person, for a channel nothing can read. A tick, because the post did go out — but
+     never the same tick as a measured one. */
+  okh:  { g:"✓", cls:"okh",  t:"confirmed by hand — nothing can read this channel automatically" },
+  /* Viber posts alongside every other channel but cannot be read on its own, so a drop that reached
+     the rest is assumed to have reached Viber too — a dashed ✓ that a forwarded notification, when
+     one arrives, turns into a firm ✓. Never a ✗: a miss here cannot be proven, so it is never invented. */
+  asm:  { g:"✓", cls:"okc",  t:"assumed delivered — posted alongside the others; Viber cannot be read on its own, and a forwarded notification (when one arrives) confirms it" },
+  miss: { g:"✗", cls:"miss", t:"nothing posted in this drop" },
+  lang: { g:"⚠", cls:"lang", t:"posted, but the caption is in the wrong language" },
+  none: { g:"·", cls:"none", t:"no data for this channel" },
+};
+const TABS = [["sum", "Summary"], ["drops", "What went out"], ["log", "Post log"], ["chan", "Per channel"]];
+let dcTab = "sum";
+
+const nn = v => (v === null || v === undefined || v === "" ? "—" : v);
+const compact = n => n === null || n === undefined ? "—"
+  : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M"
+  : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K" : String(n);
+/* Facebook reports counts as the strings it printed ("1.2K"); everywhere else they are numbers.
+   Shortening only the numbers keeps both readable instead of dropping the string form. */
+const num2 = v => v == null || v === "" ? "—" : (typeof v === "number" ? compact(v) : String(v));
+const dur = s => s === null || s === undefined ? "—"
+  : s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s";
+const clean = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+
+function dailyCheckModal(o){
+  const draw = () => {
+    const chans = dcChannels(o);
+    const wo = windowOpt();
+    const rep = reconcile(chans, { tz:checks.tz, win:checks.win, maxPerPeriod:checks.maxPer || 4, ...wo });
+    const nameOf = id => (chans.find(c => c.id === id) || {}).name || id;
+    const chanOf = id => chans.find(c => c.id === id) || {};
+
+    /* ── which sources have reported, and is anything waiting ──
+       Server: everything api/collect can read without a login. Browser: everything that only
+       answers to a session, via the extension. Platform names for the two rows below are derived
+       from whichever channels are actually present, rather than spelled out — so the next
+       platform added to either side never has to be found and edited in here by hand. */
+    const srvIds = chans.filter(c => ["youtube", "telegram", "x", "viber"].indexOf(c.platform) !== -1).map(c => c.id);
+    const brwIds = chans.filter(c => ["facebook", "instagram"].indexOf(c.platform) !== -1).map(c => c.id);
+    const platNames = ids => [...new Set(chans.filter(c => ids.indexOf(c.id) !== -1)
+      .map(c => platform(c.platform).name))].join(" · ");
+    const gotFrom = ids => ids.filter(id => (checks.posts[id] || []).length ||
+      Object.keys(checks.counts || {}).some(d => checks.counts[d][id])).length;
+    let pending = null;
+    try{ pending = JSON.parse(localStorage.getItem(BRUN) || "null"); }catch(e){}
+    const pendingN = pending && Array.isArray(pending.results) ? pending.results.length : 0;
+
+    /* A source this org simply has no channels for is not a source that failed — it gets a muted
+       row and no count, rather than an off dot and "0/0 channels" beside an em-dash, which read
+       as something broken. */
+    const srcRow = (label, what, have, total, extra) => `
+      <div class="dc-src${total ? "" : " none"}">
+        <span class="dot ${!total ? "off" : have === total ? "on" : have ? "part" : "off"}"></span>
+        <b>${esc(label)}</b><span class="dc-sw">${esc(total ? what : "no channels of this kind here")}</span>
+        <span class="sp"></span>
+        ${total ? `<span class="dc-sn">${have}/${total} channel${total === 1 ? "" : "s"}</span>` : ""}
+        ${total ? (extra || "") : ""}
+      </div>`;
+
+    const sources = `
+      <div class="dc-srcs">
+        <div class="dc-run">
+          <button class="b p" id="dcAll"><i data-lucide="play"></i> Run everything</button>
+          <span class="dc-sw">${extReady
+            ? "server + extension, one press"
+            : brwIds.length ? `extension not detected — only ${esc(platNames(srvIds) || "the server")} will run`
+                            : "server only — this org has no Facebook or Instagram channels"}</span>
+          <span class="sp"></span>
+          ${pendingN ? `<button class="b s" id="dcMerge"><i data-lucide="download"></i> Merge ${pendingN} waiting</button>` : ""}
+          <button class="b s" id="dcRun" title="${esc(platNames(srvIds) || "Server")} only">Server only</button>
+        </div>
+        ${srcRow("Server", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
+        ${srcRow("Browser", platNames(brwIds), gotFrom(brwIds), brwIds.length,
+          `<span class="dc-sn" style="opacity:.75">${extReady ? "extension ready" : "extension not detected"}</span>`)}
+      </div>`;
+
+    /* ── headline ── */
+    const problems = rep.alerts.length;
+    const headline = problems
+      ? `<div class="dc-head bad"><i data-lucide="triangle-alert"></i>
+           <div style="min-width:0"><b>${problems} problem${problems === 1 ? "" : "s"}</b>
+           <div class="dc-alist">${rep.alerts.map(a => `<div class="dc-al ${esc(a.kind)}">
+             <span class="dc-ak">${esc(a.kind === "lang" ? "language" : a.kind === "maybe" ? "maybe" : a.kind)}</span>
+             <span class="dc-at"><b>${esc(a.name)}</b> — ${esc(a.text)}</span></div>`).join("")}</div></div></div>`
+      : rep.expected === null
+        /* named the button that actually exists — there has been no "Collect" in this modal since
+           the two halves were put behind one press, and pointing at a control by the wrong name in
+           the empty state is the worst possible moment to do it */
+        ? `<div class="dc-head warn"><i data-lucide="circle-help"></i><div><b>Nothing measured yet</b>
+             <div class="dc-sub">Press <b>Run everything</b> — it reads ${esc(platNames(srvIds) || "the server channels")}${
+               brwIds.length ? " and asks the extension for " + esc(platNames(brwIds)) : ""} in one go.</div></div></div>`
+        : `<div class="dc-head good"><i data-lucide="check-check"></i><div>
+             <b>All clear — every collected channel got all ${rep.expected} post${rep.expected === 1 ? "" : "s"}</b>
+             ${rep.sum.unknown ? `<div class="dc-sub">${rep.sum.unknown} channel(s) still have no data.</div>` : ""}</div></div>`;
+
+    /* ── tab: summary matrix ── */
+    /* how many channels could have received a drop at all — the ones with no data of any kind are
+       not part of the denominator, or every column would read short on their account */
+    const covTotal = rep.rows.filter(r => r.mode !== "none").length;
+    const mxHead = `<tr><th class="stick">Channel</th>
+      ${rep.slots.map(s => {
+        const got = s.present.length;
+        return `<th class="ctr" title="${esc(fmtWhen(s.at, rep.tz))}">${esc(s.time)}${
+          rep.hours > 24 ? `<span class="dy">${esc(s.day.slice(5))}</span>` : ""}${
+          covTotal ? `<span class="cov${got < covTotal ? " short" : ""}" title="${
+            got} of ${covTotal} channel(s) got this drop">${got}/${covTotal}</span>` : ""}</th>`;
+      }).join("")}
+      <th class="ctr">Total</th><th class="whyc">Why</th></tr>`;
+
+    const mxBody = rep.langs.map(lg => {
+      const rows = rep.rows.filter(r => (r.lang || "—") === lg);
+      return `<tr class="lgrp"><td colspan="${rep.slots.length + 3}">${
+        esc(lg === "—" ? "no language set" : lg)} · ${rows.length} channel${rows.length === 1 ? "" : "s"}</td></tr>` +
+        rows.map(r => {
+          const meta = checks.meta[r.id] || {};
+          const cells = r.cells.map(c => {
+            const d = CELL[c.state];
+            const tip = c.state === "lang" && c.detected
+              ? `caption looks ${c.detected.lang.toUpperCase()} — ${c.detected.why}`
+              : c.state === "okc" ? `${Math.round(c.score * 100)}% caption match — ${d.t}`
+              : c.state === "miss" && c.score != null
+                ? `best caption match was only ${Math.round(c.score * 100)}%`
+              : c.lateBy ? `posted, but ${fmtGap(c.lateBy)} behind the rest of this drop`
+              : c.state === "ok" && c.extra ? `${c.extra + 1} posts in this drop` : d.t;
+            /* the only cells in the matrix that are controls: a channel nothing can read, waiting
+               for the one source that does know */
+            const askTip = !c.askable ? ""
+              : c.state === "okh" ? " · click to mark it missing"
+              : c.state === "miss" ? " · click to clear"
+              : " · click to confirm it went out";
+            const attrs = c.askable
+              ? ` class="ctr ask" data-ask="${esc(r.id)}" data-at="${esc(c.at)}"`
+              : ` class="ctr"`;
+            return `<td${attrs} title="${esc(tip + askTip)}"><span class="cl ${d.cls}${
+              c.lateBy ? " lt" : ""}">${d.g}${
+              c.state === "ok" && c.extra ? `<sup>+${c.extra}</sup>` : ""}</span></td>`;
+          }).join("");
+          /* A measured overshoot and a number guessed off a page were both amber, so the pill
+             could not say which it was. Overshoot keeps the solid fill it earned by being
+             measured; a suggestion gets the dashed outline this report uses everywhere else for
+             "arrived at indirectly, not confirmed". */
+          const total = r.mode === "none"
+            ? `<span class="dc-pill un">${meta.unsupported ? "n/a" : "—"}</span>`
+            : r.mode === "timefold"
+              ? (() => { const conf = r.cells.filter(x => x.state === "ok").length;
+                  return `<span class="dc-pill okc" title="assumed delivered on every drop (posts alongside the others); ${conf} confirmed by a forwarded notification, the rest assumed — Viber cannot be read on its own">${r.count}${conf ? ` · ${conf}✓` : ""}</span>`; })()
+            : r.expected === null ? `<span class="dc-pill un">${r.count}</span>`
+            : `<span class="dc-pill ${r.suggested ? "guess" : r.status === "ok" ? "ok"
+                : r.status === "short" ? "short" : "sg"}"${
+                r.suggested ? ' title="read off the page — confirm it below"' : ""}>${r.count}/${r.expected}</span>`;
+          const why = r.mode === "none"
+            ? (meta.dead ? "link is dead" : meta.unsupported ? "not supported"
+               : r.platform === "facebook" && (checks.posts[r.id] || []).length
+                 ? "no captions to match on — its dates cannot prove absence"
+               : meta.browserRequired ? "run the extension" : "not collected")
+            : r.mode === "timefold" ? "assumed delivered — posts alongside the others; ✓ = a notification confirmed it"
+            : r.suggested ? "suggested — confirm below" : "";
+          /* A channel nobody can read still has to be answered by a person, and on almost every
+             day the answer is "all of them went out". Ticking four cells to say that is four times
+             the work it deserves, so the whole row can be answered at once and the cells are left
+             for the day something actually went wrong. The link opens the channel itself, since
+             the answer is never in this window — it is on the reader's phone. */
+          const askable = r.cells.some(x => x.askable);
+          const ch = chanOf(r.id);
+          const ask = !askable ? "" : `<div class="dc-ask">
+            <button class="dc-askb" data-askall="${esc(r.id)}"
+              title="mark every drop as delivered on this channel">✓ all ${rep.slots.length}</button>
+            ${r.cells.some(x => x.state === "okh" || x.state === "miss")
+              ? `<button class="dc-askb" data-askclear="${esc(r.id)}" title="clear every answer">clear</button>` : ""}
+            ${ch.url ? `<a class="dc-askb" href="${esc(ch.url)}" target="_blank" rel="noopener noreferrer"
+              title="open this channel to check">open</a>` : ""}</div>`;
+          return `<tr><td class="stick ch">${esc(r.name)}</td>${cells}
+            <td class="ctr">${total}</td><td class="mt">${ask || esc(why)}</td></tr>`;
+        }).join("");
+    }).join("");
+
+    const tabSum = `
+      ${headline}
+      ${rep.slots.length || rep.rows.some(r => r.mode !== "none")
+        ? `<div class="dc-tw"><table class="dc mx"><thead>${mxHead}</thead><tbody>${mxBody}</tbody></table></div>
+           <div class="dc-key">
+             <span><span class="cl ok">✓</span> posted</span>
+             ${rep.slots.some(s => (s.late || []).length)
+               ? `<span><span class="cl ok lt">✓</span> posted, but behind the rest</span>` : ""}
+             <span><span class="cl okc">≈</span> same content, matched by caption</span>
+             ${rep.rows.some(r => r.mode === "timefold")
+               ? `<span><span class="cl okc">✓</span> assumed delivered — Viber posts alongside the others</span>` : ""}
+             ${rep.rows.some(r => r.cells.some(x => x.askable))
+               ? `<span><span class="cl okh">✓</span> confirmed by hand — click these cells</span>` : ""}
+             <span><span class="cl miss">✗</span> missing</span>
+             <span><span class="cl lang">⚠</span> wrong language</span>
+             <span><span class="cl none">·</span> no data</span>
+           </div>`
+        : `<div class="dc-empty">Nothing collected in this window yet.</div>`}`;
+
+    /* ── tab: drops ── */
+    const tabDrops = rep.slots.length ? rep.slots.map(s => {
+      const seen = new Map();
+      for(const p of s.posts){
+        const d = detectLang(p.text);
+        if(d.lang && !seen.has(d.lang)) seen.set(d.lang, p);
+      }
+      const caps = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([lg, p]) => {
+        const t = clean(p.text);
+        return `<div class="dc-cap"><span class="dc-pill un">${esc(lg)}</span>
+          ${esc(t.slice(0, 240))}${t.length > 240 ? "…" : ""}</div>`;
+      }).join("");
+      const th = (s.posts.find(p => p.thumb) || {}).thumb;
+      return `<div class="dc-drop${s.missing.length ? " gap" : ""}">
+        <div class="dc-dt">
+          ${th ? `<img class="dc-th" src="${esc(th)}" alt="" loading="lazy">` : ""}
+          <div style="min-width:0;flex:1">
+            <div class="dc-dt2"><b>${esc(hhmmss(s.at, rep.tz))}</b>
+              <span class="dc-pill un">${esc(s.kinds.join(", ") || "post")}</span>
+              <span class="dc-pill ${s.missing.length ? "short" : "ok"}">${s.present.length} channel${s.present.length === 1 ? "" : "s"}</span>
+              ${(s.late || []).length ? `<span class="dc-pill late" title="${esc((s.late || [])
+                  .map(l => nameOf(l.id) + " " + fmtGap(l.mins) + " behind").join(" · "))
+                }">${s.late.length} late</span>` : ""}
+            </div>
+            <div class="dc-spread">${s.posts.slice().sort((a, b) => new Date(a.ts) - new Date(b.ts))
+              .map(p => {
+                const l = (s.late || []).find(x => x.id === p.channelId);
+                return `<span title="${esc(hhmmss(p.ts, rep.tz))}${l ? " — " + fmtGap(l.mins) + " behind the rest of this drop" : ""}">${
+                  esc(nameOf(p.channelId))} <b>${esc(hhmm(p.ts, rep.tz))}</b>${
+                  l ? `<i class="dc-lt">+${esc(fmtGap(l.mins))}</i>` : ""}</span>`;
+              }).join("")
+              /* confirmed by caption, so there is no time to print — marked rather than omitted,
+                 which is what made a drop on six channels report four */
+              + (s.byContent || []).map(id => `<span title="confirmed by caption, not by time">${
+                  esc(nameOf(id))} <b>≈</b></span>`).join("")}</div>
+          </div>
+        </div>
+        ${caps || `<div class="dc-cap">no caption text collected for this drop</div>`}
+        ${s.missing.length ? `<div class="dc-miss">missing on ${esc(s.missing.map(nameOf).join(", "))}</div>` : ""}
+      </div>`;
+    }).join("") : `<div class="dc-empty">No drops in this window.</div>`;
+
+    /* ── tab: post log — every post, exact time, everything the platform gave ── */
+    /* Facebook's timestamped posts carry no text — its captions are tracked separately, because
+       the two cannot be paired at the source. That left its rows here blank, caption and language
+       both. They can be paired here though: a post sits inside a drop, and that drop's caption
+       match for this channel is known, so lend it the words and the banner. */
+    const rowOf = id => rep.rows.find(r => r.id === id);
+    const matchAt = (channelId, ts) => {
+      const r = rowOf(channelId);
+      if(!r || r.mode !== "content") return null;
+      const i = rep.slots.findIndex(s => s.posts.concat([{ ts:s.at }])
+        .some(() => Math.abs(new Date(s.at) - new Date(ts)) <= rep.win * 60e3));
+      const cell = i >= 0 ? r.cells[i] : null;
+      return cell && cell.state === "okc" ? { post:cell.post, score:cell.score } : null;
+    };
+
+    const logPosts = [];
+    for(const c of chans)
+      for(const p of (checks.posts[c.id] || []))
+        if(new Date(p.ts) >= new Date(rep.from) && new Date(p.ts) <= new Date(rep.to)){
+          const m = (p.text || "").trim() ? null : matchAt(c.id, p.ts);
+          logPosts.push(m
+            ? { ...p, channelId:c.id, text:m.post.text, thumb:p.thumb || m.post.thumb,
+                permalink:p.permalink || m.post.permalink, reactions:m.post.reactions,
+                comments:p.comments != null ? p.comments : m.post.comments,
+                views:p.views != null ? p.views : m.post.views, viaCaption:true, score:m.score }
+            : { ...p, channelId:c.id });
+        }
+    logPosts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+    const tabLog = logPosts.length ? `
+      <div class="dc-tw"><table class="dc"><thead><tr>
+        <th>Time</th><th>Channel</th><th>Lang</th><th>Type</th>
+        <th class="num">Views</th><th class="num">Likes</th><th class="num">Comm.</th>
+        <th class="num">Length</th><th>Caption</th><th></th></tr></thead>
+      <tbody>${logPosts.map(p => {
+        const c = chanOf(p.channelId), d = detectLang(p.text);
+        const bad = c.lang && d.lang && d.lang !== c.lang;
+        const t = clean(p.text);
+        return `<tr${bad ? ' class="warnrow"' : ""}>
+          <td class="mono">${esc(hhmmss(p.ts, rep.tz))}</td>
+          <td class="ch">${esc(c.name || p.channelId)}</td>
+          <td>${d.lang ? `<span class="dc-pill ${bad ? "short" : "un"}" title="${esc(d.why)}">${esc(d.lang)}</span>`
+                       : `<span class="dc-pill un" title="${esc(d.why)}">?</span>`}</td>
+          <td>${esc(p.kind || "—")}</td>
+          <td class="num mono">${esc(num2(p.views))}</td>
+          <td class="num mono">${esc(num2(p.likes != null ? p.likes : p.reactions))}</td>
+          <td class="num mono">${esc(num2(p.comments))}</td>
+          <td class="num mono">${esc(dur(p.duration))}</td>
+          <td class="cap" title="${esc(t)}">${p.viaCaption
+            ? `<span class="dc-pill okc" title="paired with the caption that matched this drop">≈${
+                Math.round((p.score || 0) * 100)}%</span> ` : ""}${
+            esc(t.slice(0, 90))}${t.length > 90 ? "…" : ""}</td>
+          <td>${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener noreferrer"
+                title="open the post"><i data-lucide="arrow-up-right"></i></a>` : ""}</td>
+        </tr>`;
+      }).join("")}</tbody></table></div>
+      <div class="dc-key"><span>${logPosts.length} post(s) with timestamps.
+        Facebook is absent here — it prints "2h", never an instant, so its posts have no time to log.</span></div>`
+      : `<div class="dc-empty">No timestamped posts in this window.</div>`;
+
+    /* ── tab: per channel ── */
+    const tabChan = rep.rows.map(r => {
+      const meta = checks.meta[r.id] || {};
+      /* A content-matched channel has no usable timestamps, so listing its timestamped posts
+         showed a bare "18:32:07 post ?" and none of what actually matched. Show the drops it
+         accounted for instead: the caption that matched, its banner, and its score. */
+      const mine = r.mode === "content"
+        ? r.cells.map((x, i) => {
+            if(x.state !== "okc" || !x.post) return null;
+            const slot = rep.slots[i];
+            /* The banner only comes with a caption read from the DOM, and most arrive from the
+               page's HTML instead. Rather than show nothing, borrow the drop's own artwork — every
+               other channel posted the same thing — and mark it, because "this channel's picture"
+               and "this drop's picture" are different claims and only one of them is verified. */
+            const own = x.post.thumb || "";
+            const shared = !own && slot ? (slot.posts.find(p => p.thumb) || {}).thumb : "";
+            return { ...x.post, channelId:r.id, ts:slot ? slot.at : null,
+                     slotTime:slot ? slot.time : "", score:x.score,
+                     kind:x.post.kind || "post",
+                     thumb:own || shared || "", borrowedThumb:!own && !!shared };
+          }).filter(Boolean)
+        : logPosts.filter(p => p.channelId === r.id);
+      const sum = f => mine.reduce((n, p) => (typeof p[f] === "number" ? n + p[f] : n), 0);
+      const anyViews = mine.some(p => typeof p.views === "number");
+      return `<div class="dc-ch">
+        <div class="dc-cht">
+          <b>${esc(r.name)}</b>
+          <span class="dc-pill un">${esc(r.lang || "no language")}</span>
+          ${r.mode === "none"
+            ? `<span class="dc-pill un">${meta.unsupported ? "not supported" : "no data"}</span>`
+            : r.mode === "timefold"
+              ? `<span class="dc-pill okc" title="assumed delivered — Viber posts alongside the others and cannot be read on its own">${r.count} assumed${r.cells.filter(x=>x.state==="ok").length ? ` · ${r.cells.filter(x=>x.state==="ok").length}✓` : ""}</span>`
+            : `<span class="dc-pill ${r.status === "ok" ? "ok" : r.status === "short" ? "short" : "sg"}">${
+                r.count}${r.expected === null ? "" : "/" + r.expected}</span>`}
+          ${r.suggested ? `<span class="dc-pill sg">suggested</span>` : ""}
+          <span class="sp"></span>
+          ${anyViews ? `<span class="dc-sn">${compact(sum("views"))} views</span>` : ""}
+          ${mine.some(p => p.likes != null) ? `<span class="dc-sn">${compact(sum("likes"))} likes</span>` : ""}
+        </div>
+        ${r.missedAt.length ? `<div class="dc-miss">nothing at ${esc(r.missedAt.join(", "))}</div>` : ""}
+        ${meta.note ? `<div class="mt" style="margin-top:5px">${esc(meta.note)}</div>` : ""}
+        ${r.mode === "content" ? r.cells.map((x, i) => x.state === "miss" && rep.slots[i]
+          ? `<div class="dc-miss">nothing matching the ${esc(rep.slots[i].time)} drop —
+               closest caption was ${Math.round((x.score || 0) * 100)}%</div>` : "").join("") : ""}
+        ${mine.length ? `<div class="dc-plist">${mine.map(p => {
+          const d = detectLang(p.text), bad = r.lang && d.lang && d.lang !== r.lang;
+          const t = clean(p.text);
+          /* Counts off a Facebook page arrive as the strings it printed ("1.2K"); everywhere else
+             they are numbers. Show whichever came, rather than dropping the string form. */
+          const stat = (v, label) => v == null || v === "" ? ""
+            : `<span class="dc-sn">${esc(typeof v === "number" ? compact(v) : v)} ${label}</span>`;
+          return `<div class="dc-p${bad ? " bad" : ""}">
+            ${p.thumb ? `<img class="dc-th sm${p.borrowedThumb ? " borrowed" : ""}" src="${esc(p.thumb)}"
+                 alt="" loading="lazy" title="${p.borrowedThumb
+                   ? "this drop's artwork, taken from another channel — not read from this one"
+                   : "read from this channel's own post"}">` : ""}
+            <div style="min-width:0;flex:1">
+              <div class="dc-pm">
+                <b class="mono">${esc(p.ts ? hhmmss(p.ts, rep.tz) : (p.timeLabel || p.slotTime || "—"))}</b>
+                ${p.borrowedThumb ? `<span class="dc-pill un" title="the banner shown is the drop's, not this channel's">borrowed art</span>` : ""}
+                <span class="dc-pill un">${esc(p.kind || "post")}</span>
+                <span class="dc-pill ${bad ? "short" : "un"}">${esc(d.lang || "?")}</span>
+                ${p.score != null ? `<span class="dc-pill okc" title="caption match">≈${Math.round(p.score * 100)}%</span>` : ""}
+                ${stat(p.views, "views")}${stat(p.likes, "likes")}${stat(p.reactions, "reactions")}
+                ${stat(p.comments, "comments")}${stat(p.reposts, "reposts")}
+                ${p.duration != null ? `<span class="dc-sn">${dur(p.duration)}</span>` : ""}
+                ${p.permalink ? `<a href="${esc(p.permalink)}" target="_blank" rel="noopener noreferrer"><i data-lucide="arrow-up-right"></i></a>` : ""}
+              </div>
+              <div class="dc-pt">${esc(t.slice(0, 220))}${t.length > 220 ? "…" : ""}</div>
+            </div></div>`;
+        }).join("")}</div>` : ""}
+      </div>`;
+    }).join("");
+
+    /* ── manual counts ── */
+    const manualRows = rep.rows.filter(r => r.mode !== "timeline");
+    const manual = manualRows.length ? `
+      <div class="sec-h" style="margin-top:16px"><h3><i data-lucide="pencil"></i> Counts by hand
+        <span class="ct">${manualRows.length}</span></h3></div>
+      <div class="dc-tw"><table class="dc"><thead><tr><th>Channel</th><th>Posts in window</th><th>How</th></tr></thead>
+        <tbody>${manualRows.map(r => {
+          const meta = checks.meta[r.id] || {};
+          return `<tr><td class="ch">${esc(r.name)}</td>
+            <td><input class="cnt${r.suggested ? " guess" : ""}" type="number" min="0" inputmode="numeric"
+                  data-ci="${esc(r.id)}" value="${r.mode === "count" ? esc(r.count) : ""}"
+                  placeholder="–"${meta.unsupported ? " disabled" : ""}${
+                  r.suggested ? ' title="read off the page — this is a guess until you confirm it"' : ""}></td>
+            <td class="mt">${esc(r.suggested ? (meta.note || "read off the page — confirm it")
+                              : meta.unsupported ? "nothing can read this one" : meta.note || "")}</td></tr>`;
+        }).join("")}</tbody></table></div>` : "";
+
+    const panel = { sum:tabSum, drops:tabDrops, log:tabLog, chan:tabChan }[dcTab] || tabSum;
+
+    openModal(`
+      <div class="mh"><h3><i data-lucide="calendar-check"></i>Daily check — ${esc(o.name)}</h3>${X}</div>
+      <div class="mb">
+        <div class="dc-top">
+          <div class="dc-bar">
+            <label class="dc-fld"><span>Window</span>
+              <select id="dcWindow" title="Which stretch of time to report on">
+                ${WINDOWS.map(([v, l]) => `<option value="${v}"${String(checks.window || "today") === v ? " selected" : ""}>${esc(l)}</option>`).join("")}
+              </select></label>
+            ${String(checks.window) === "date"
+              ? `<label class="dc-fld"><span>Date</span>
+                   <input id="dcDate" type="date" value="${esc(checks.date || contentDate(new Date().toISOString(), Number(checks.tz) || 0))}"
+                     max="${esc(contentDate(new Date().toISOString(), Number(checks.tz) || 0))}"
+                     title="Which day, in the timezone chosen next to this"></label>` : ""}
+            <label class="dc-fld"><span>Timezone</span>
+              <select id="dcTz" title="Which timezone the times are shown in">
+                ${TZS.map(([v, l]) => `<option value="${v}"${Number(checks.tz) === v ? " selected" : ""}>${esc(l)}</option>`).join("")}
+              </select></label>
+            <label class="dc-fld"><span>Same drop within</span>
+              <select id="dcWin" title="How far apart two posts can be and still count as the same drop">
+                ${[5, 10, 15, 30, 60].map(v => `<option value="${v}"${checks.win === v ? " selected" : ""}>±${v} min</option>`).join("")}
+              </select></label>
+            <label class="dc-fld"><span>Flag above</span>
+              <select id="dcMax" title="Flag a channel that posts more than this in the window">
+                ${[2, 3, 4, 5, 6, 8].map(v => `<option value="${v}"${(checks.maxPer || 4) === v ? " selected" : ""}>max ${v}</option>`).join("")}
+              </select></label>
+            <span class="sp"></span>
+            <span class="dc-when">${
+              checks.lastRun ? "collected " + new Date(checks.lastRun).toLocaleString() : "never collected"}</span>
+          </div>
+          <div class="dc-win">${wo.mode === "day"
+            /* a whole day runs midnight to midnight, which rendered as "00:00–00:00" and read as
+               an empty range; only a day still in progress has a meaningful end time */
+            ? `<b>${esc(wo.date)}</b> · ${esc(dayRange(rep))}`
+            : `<b>${esc(fmtWhen(rep.from, rep.tz))}</b> → <b>${esc(fmtWhen(rep.to, rep.tz))}</b>`}
+            · ${esc(tzLabel(rep.tz))} · drops grouped within ±${rep.win} min</div>
+        </div>
+
+        ${sources}
+
+        <div class="dc-tabs">${TABS.map(([k, l]) => `<button class="dc-tab${dcTab === k ? " on" : ""}"
+          data-tab="${k}">${esc(l)}${k === "log" ? ` <span class="ct">${logPosts.length}</span>` : ""}${
+          k === "drops" ? ` <span class="ct">${rep.slots.length}</span>` : ""}</button>`).join("")}</div>
+
+        <div class="dc-panel">${panel}</div>
+        ${dcTab === "sum" ? manual : ""}
+      </div>
+      <div class="mf">
+        <button class="b" data-close>Close</button>
+        <button class="b" id="dcCopy"><i data-lucide="copy"></i> Copy report</button>
+        <button class="b d" id="dcClear"><i data-lucide="trash-2"></i> Delete report</button>
+      </div>`, { wide:true, focus:null });
+    mo.className = "mo xw";
+
+    mo.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { dcTab = b.dataset.tab; draw(); });
+
+    const all = mo.querySelector("#dcAll");
+    all.onclick = async () => {
+      all.disabled = true; all.textContent = "Running…";
+      try{ await runEverything(o); } finally { draw(); }
+    };
+    mo.querySelector("#dcRun").onclick = async () => { await collectServer(o); absorbBrowserRun(); draw(); };
+    const mg = mo.querySelector("#dcMerge");
+    if(mg) mg.onclick = () => { const n = absorbBrowserRun(); draw();
+      if(!n) toast("That run had nothing new in it", "info"); };
+
+    const set = (id, key, num) => { const el = mo.querySelector(id);
+      if(el) el.onchange = e => {
+        checks[key] = num ? Number(e.target.value) : e.target.value; saveChecks(); draw(); }; };
+    set("#dcWindow", "window"); set("#dcDate", "date");
+    set("#dcTz", "tz", true); set("#dcWin", "win", true); set("#dcMax", "maxPer", true);
+
+    mo.querySelectorAll("input.cnt").forEach(inp => {
+      inp.onchange = () => {
+        const day = contentDate(rep.to, checks.tz), id = inp.dataset.ci, v = inp.value.trim();
+        checks.counts[day] = checks.counts[day] || {};
+        if(v === "") delete checks.counts[day][id];
+        else checks.counts[day][id] = { n:Math.max(0, parseInt(v, 10) || 0), source:"manual" };
+        saveChecks(); draw();
+      };
+    });
+
+    /* the tickable cells: unanswered → went out → did not go out → unanswered.
+       Three states, not two, because "I looked and it was not there" is a different fact from
+       "I have not looked yet", and only the first should ever read as a miss. */
+    /* the whole row at once — the answer on a normal day */
+    mo.querySelectorAll("[data-askall]").forEach(b => {
+      b.onclick = e => {
+        e.stopPropagation();
+        const id = b.dataset.askall;
+        checks.confirms = checks.confirms || {};
+        checks.confirms[id] = checks.confirms[id] || {};
+        for(const s of rep.slots) checks.confirms[id][s.at] = true;
+        saveChecks(); draw();
+        toast(`${rep.slots.length} drop(s) confirmed on ${nameOf(id)}`, "check-check");
+      };
+    });
+    mo.querySelectorAll("[data-askclear]").forEach(b => {
+      b.onclick = e => {
+        e.stopPropagation();
+        delete (checks.confirms || {})[b.dataset.askclear];
+        saveChecks(); draw();
+      };
+    });
+
+    mo.querySelectorAll("td.ask").forEach(td => {
+      td.onclick = () => {
+        const id = td.dataset.ask, at = td.dataset.at;
+        checks.confirms = checks.confirms || {};
+        checks.confirms[id] = checks.confirms[id] || {};
+        const cur = checks.confirms[id][at];
+        if(cur === undefined) checks.confirms[id][at] = true;
+        else if(cur === true) checks.confirms[id][at] = false;
+        else delete checks.confirms[id][at];
+        saveChecks(); draw();
+      };
+    });
+
+    mo.querySelector("#dcCopy").onclick = () => {
+      const L = [`${o.name} — daily check`,
+        wo.mode === "day"
+          ? `${wo.date}  ${hhmm(rep.from, rep.tz)}–${hhmm(rep.to, rep.tz)}  (${tzLabel(rep.tz)})`
+          : `${fmtWhen(rep.from, rep.tz)} → ${fmtWhen(rep.to, rep.tz)}  (${tzLabel(rep.tz)})`,
+        `expected ${rep.expected === null ? "— nothing measured" : rep.expected + " post(s) per channel"}`, "",
+        /* Which half reported has to be in the pasted copy too. Without it a report full of
+           "no data" cannot be told apart from one where the extension was never run. */
+        "SOURCES",
+        `  server     ${gotFrom(srvIds)}/${srvIds.length} channel(s)` +
+          (checks.lastRun ? `  last collected ${new Date(checks.lastRun).toLocaleString()}` : "  never collected"),
+        `  extension  ${gotFrom(brwIds)}/${brwIds.length} channel(s)  ` +
+          (extReady ? "detected" : "NOT DETECTED — reload it at chrome://extensions") +
+          (pendingN ? `  ${pendingN} run(s) waiting to be merged` : ""),
+        ""];
+
+      L.push(rep.alerts.length ? `PROBLEMS (${rep.alerts.length})` : "PROBLEMS — none");
+      for(const a of rep.alerts) L.push(`  [${a.kind}] ${a.name} — ${a.text}`);
+
+      L.push("", "COUNTS");
+      for(const lg of rep.langs){
+        L.push(`  [${lg === "—" ? "no language" : lg}]`);
+        for(const r of rep.rows.filter(x => (x.lang || "—") === lg)){
+          const meta = checks.meta[r.id] || {};
+          const v = r.mode === "none"
+            ? (meta.unsupported ? "not supported" : meta.dead ? "LINK DEAD" : "no data")
+            : r.mode === "timefold" ? `${r.count} assumed, ${r.cells.filter(x=>x.state==="ok").length} confirmed by notification`
+            : r.expected === null ? `${r.count} (no target)` : `${r.count}/${r.expected}`;
+          L.push(`    ${r.status === "ok" ? "ok   " : r.status === "short" ? "SHORT" :
+                        r.status === "over" ? "OVER " : r.status === "seen" ? "seen " : "  -  "} ${r.name} — ${v}` +
+            (r.missedAt.length ? `  (nothing at ${r.missedAt.join(", ")})` : "") +
+            (r.suggested ? " [suggested]" : ""));
+          /* Say how the number was arrived at, for every mode. Restricting this to "no data" rows
+             hid the caption diagnostics on exactly the channels being investigated — a short
+             content match needs its evidence shown just as much as an absent one. */
+          if(meta.note) L.push(`            how: ${meta.note}`);
+          else if(r.mode === "none" && !meta.at) L.push(`            how: never attempted`);
+          if(r.mode === "content")
+            L.push(`            matched on captions (${(checks.captions[r.id] || []).length} known)` +
+              r.cells.map((x, i) => ` · ${rep.slots[i] ? rep.slots[i].time : i}:` +
+                (x.state === "okc" ? Math.round(x.score * 100) + "%"
+                 : x.state === "miss" ? "best " + Math.round((x.score || 0) * 100) + "%" : x.state)).join(""));
+          if(meta.routeLog && r.mode !== "timeline")
+            for(const x of meta.routeLog)
+              L.push(`            route ${(x.url || "?").replace(/^https?:\/\//, "")} → ` +
+                `${x.status || x.error || "?"}` +
+                (x.bytes != null ? ` ${x.bytes}b` : "") +
+                (x.stamps != null ? ` ${x.stamps} stamp(s) ${x.ids} id(s)` : "") +
+                (x.markers && Object.keys(x.markers).length ? ` ${JSON.stringify(x.markers)}` : "") +
+                (x.login ? " LOGIN-WALL" : "") + (x.rejected ? ` rejected: ${x.rejected}` : ""));
+        }
+      }
+
+      L.push("", "EVERY POST, EXACT TIME");
+      for(const p of logPosts){
+        const c = chanOf(p.channelId), d = detectLang(p.text);
+        const bad = c.lang && d.lang && d.lang !== c.lang;
+        L.push(`  ${hhmmss(p.ts, rep.tz)}  ${(c.name || "").padEnd(26)} ${(d.lang || "?").padEnd(3)}` +
+          `${bad ? " WRONG-LANG" : "          "} ${(p.kind || "").padEnd(8)}` +
+          ` views=${String(nn(p.views)).padStart(6)} likes=${String(nn(p.likes)).padStart(5)}` +
+          ` len=${String(nn(p.duration)).padStart(4)}s`);
+        const t = clean(p.text);
+        if(t) L.push(`            "${t.slice(0, 100)}${t.length > 100 ? "…" : ""}"`);
+        if(p.permalink) L.push(`            ${p.permalink}`);
+      }
+
+      L.push("", "DROPS");
+      for(const s of rep.slots){
+        L.push(`  ${hhmmss(s.at, rep.tz)}  ${s.present.length} channel(s)  ${s.kinds.join(",")}` +
+          (s.missing.length ? `  MISSING: ${s.missing.map(nameOf).join(", ")}` : "") +
+          /* a drop that reached a channel hours late is the one thing a pasted report would
+             otherwise lose entirely — the times below say it, but only if you do the arithmetic */
+          ((s.late || []).length
+            ? `  LATE: ${s.late.map(l => `${nameOf(l.id)} +${fmtGap(l.mins)}`).join(", ")}` : ""));
+        for(const p of s.posts.slice().sort((a, b) => new Date(a.ts) - new Date(b.ts))){
+          const l = (s.late || []).find(x => x.id === p.channelId);
+          L.push(`        ${hhmmss(p.ts, rep.tz)}  ${nameOf(p.channelId)}` +
+            (l ? `  (+${fmtGap(l.mins)} behind)` : ""));
+        }
+      }
+      copy(L.join("\n"), "Report copied");
+    };
+
+    mo.querySelector("#dcClear").onclick = async () => {
+      if(!await confirmBox("Delete this report?",
+        "Every collected post and hand-entered count is removed from this browser, so the next Collect starts clean. The directory itself is untouched.")) return;
+      /* confirms are kept, like ytIds: they are answers a person gave about drops, not collected
+         data, and re-collecting is no reason to make somebody tick them all again */
+      checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:checks.ytIds,
+                 confirms:checks.confirms || {}, tz:checks.tz, win:checks.win,
+                 window:checks.window, date:checks.date, maxPer:checks.maxPer, lastRun:null };
+      try{ localStorage.removeItem(BRUN); }catch(e){}
+      saveChecks(); draw(); toast("Report deleted — collect again for a fresh one", "trash-2");
+    };
+  };
+  draw();
+}
+
+/* ═══════════════════ render ═══════════════════ */
+function paintSync(){
+  const el = document.getElementById("sync");
+  if(!el) return;
+  let cls = "sync", txt = "Local only", tip = "Data is saved in this browser only";
+  if(cloud.saving){ cls += " busy"; txt = "Saving…"; tip = "Writing to the cloud"; }
+  else if(cloud.error){ cls += " warn"; txt = "Not saved"; tip = cloud.error; }
+  else if(cloud.mode === "cloud"){ cls += " on"; txt = "Cloud"; tip = "Shared across all devices" + (cloud.updatedAt ? " · saved " + new Date(cloud.updatedAt).toLocaleString() : ""); }
+  else{ cls += " warn"; }
+  el.className = cls; el.title = tip;
+  el.querySelector(".lbl").textContent = txt;
+}
+
+function render(){
+  const s = state.settings;
+  document.documentElement.dataset.theme = s.theme || "dark";
+  document.documentElement.style.setProperty("--a1", s.a1);
+  document.documentElement.style.setProperty("--a2", s.a2);
+  document.title = "SportsFC — Daily check";
+  const ttl = document.getElementById("ttl"); if(ttl) ttl.textContent = "SportsFC";
+  paintSync();
+
+  const o = SPORTSFC;
+  const app = document.getElementById("app");
+
+  /* channels grouped by language — the same pairing the report uses (VN drop ↔ EN drop) */
+  const groups = {};
+  for(const c of o.socials){ const lg = normLang(c.note) || "other"; (groups[lg] = groups[lg] || []).push(c); }
+  const LG = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese", other:"Other" };
+  const ORDER = ["vi","en","th","zh","other"];
+  const langs = Object.keys(groups).sort((a,b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+
+  const chanCard = c => {
+    const p = platform(c.platform), u = safeUrl(c.url);
+    return `<a class="ch-card" href="${esc(u)}" target="_blank" rel="noopener noreferrer" title="${esc(u)}">
+      <span class="chip" style="--c:${esc(p.color)}">${iconOf(p.icon, initials(p.name))}</span>
+      <span class="ch-meta">
+        <span class="ch-name">${esc(p.name)}</span>
+        <span class="ch-handle">${esc(c.handle || pretty(u))}</span>
+      </span>
+      <i class="ch-go" data-lucide="arrow-up-right"></i>
+    </a>`;
+  };
+
+  app.innerHTML = `
+    <div class="dash">
+      <section class="hero-card">
+        <div class="hero-eyebrow"><span class="dot-live"></span> Daily check</div>
+        <h1 class="hero-h">Did today's content reach<br>every channel?</h1>
+        <p class="hero-p">${o.socials.length} channels, ${langs.length} languages — checked drop by drop.
+          See exactly which post landed where, which is missing, and which arrived late.</p>
+        <div class="hero-cta">
+          <button class="b p xl" id="runDaily"><i data-lucide="calendar-check"></i> Run daily check</button>
+          <span class="hero-when" id="heroWhen"></span>
+        </div>
+      </section>
+
+      <section class="channels">
+        <div class="channels-h">Channels watched <span class="ct">${o.socials.length}</span></div>
+        ${langs.map(lg => `
+          <div class="ch-group">
+            <div class="ch-group-h">${esc(LG[lg] || lg)} <span class="ct">${groups[lg].length}</span></div>
+            <div class="ch-grid">${groups[lg].map(chanCard).join("")}</div>
+          </div>`).join("")}
+      </section>
+    </div>`;
+
+  const when = document.getElementById("heroWhen");
+  if(when) when.textContent = checks.lastRun ? "last run " + new Date(checks.lastRun).toLocaleString() : "not run yet";
+  document.getElementById("runDaily").onclick = () => dailyCheckModal(o);
+
+  icons(app);
+  if(!booting){
+    anim(".hero-card", { y:16, opacity:0, duration:.4 });
+    anim(".ch-card", { y:14, opacity:0, stagger:.02, duration:.34 });
+  }
+}
+
+/* ═══════════════════ boot ═══════════════════ */
+document.getElementById("thm").onclick = async () => {
+  state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = state.settings.theme;
+  writeLocal();
+  render();
+};
+/* the storage badge just explains itself — nothing to configure from here */
+document.getElementById("sync").onclick = () =>
+  toast(cloud.mode === "cloud" ? "Shared across all devices (cloud)" : "Saved in this browser only", "cloud");
+
+icons(document.body);
+
+(async () => {
+  /* pull() only tells us the storage mode + brings settings (theme, platform colours) across; the
+     channel list itself is hardcoded (SPORTSFC), never edited from the browser */
+  try{ await pull(); }
+  catch(e){ cloud.mode = "local"; state = readLocal(); }
+
+  /* bring the shared daily-check report across (cloud mode only) so this device shows whatever the
+     last run — here or elsewhere — found. Local mode keeps the browser's own copy, already loaded. */
+  await pullReport();
+
+  booting = false;
+  render();                     // render() owns the entrance animation — do not animate again here
+
+  /* the extension hands its run over through localStorage, so it may be waiting from before
+     this page loaded — and it can also arrive while the tab sits open */
+  absorbBrowserRun();
+  addEventListener("focus", () => { if(absorbBrowserRun()) render(); });
+})();
+})();
+</script>
+</body>
+</html>

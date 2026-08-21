@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Aiko Daily Check",
+  "version": "1.0.0",
+  "description": "Counts today's posts on the Facebook, Instagram and X (Twitter) channels in your Aiko directory, using the sessions and IP already in this browser. X is a fallback for when a server-side fetch is refused.",
+  "permissions": ["storage", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://instagram.com/*",
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
+    "https://m.facebook.com/*",
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*.vercel.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Aiko Daily Check" },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
