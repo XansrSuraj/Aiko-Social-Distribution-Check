@@ -423,6 +423,10 @@ td.ask .cl.none{border-style:dashed;border-color:color-mix(in srgb,var(--a1) 45%
 .dc-askb:hover{border-color:var(--a1);color:var(--a1)}
 .cl.miss{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
 .cl.lang{background:color-mix(in srgb,var(--amb) 20%,transparent);color:var(--amb)}
+/* Viber "not seen while online" — a flag to check, so amber (like lang) with a dashed edge to say
+   it is an inference, not a measured cross */
+.cl.maybe{background:color-mix(in srgb,var(--amb) 16%,transparent);color:var(--amb);
+  border:1px dashed color-mix(in srgb,var(--amb) 55%,transparent);font-weight:800}
 /* A hole, not a blank. At 55% opacity the dot was indistinguishable from an empty cell, so "we
    have no data for this channel" read as "nothing was posted" — the one confusion this report
    exists to prevent. An outlined empty box reads as a cell nobody could fill. */
@@ -1483,19 +1487,24 @@ function reconcile(channels, opt){
                        lateBy:l ? l.mins : null };
       });
     }else if(mode === "timefold"){
-      /* Content goes out to every channel together, and Viber cannot be read on its own — the only
-         automatic signal is a forwarded phone notification, which is unreliable (a killed listener,
-         a "Video message" placeholder with no caption). So every real drop is ASSUMED to have
-         reached Viber (a dashed ✓), and UPGRADED to a firm ✓ when a notification actually lands in
-         its window. Never a ✗ and never a phantom drop: a Viber miss cannot be proven from here, so
-         it is never invented, and a lone stray notification never becomes a drop of its own. */
+      /* Viber's only automatic signal is a forwarded phone notification. For each drop, three
+         honest answers — decided by whether the phone's heartbeat says it was ONLINE at that time:
+           · a notification landed in the window          → ✓ confirmed (proof it arrived)
+           · no notification, but the phone WAS online     → ⚠ not seen — a real miss, flag it
+           · no notification, and the phone was OFFLINE     → assumed (dashed ✓): we cannot verify
+         This is what stops a genuine miss from being quietly assumed away, while never crying miss
+         for a window the phone could not report on. */
       const mine = posts[c.id] || [];
+      const beatMs = (checks.beats || []).map(t => new Date(t).getTime()).filter(n => isFinite(n));
+      const COVER = 20 * 60e3;             // a heartbeat within 20 min of a drop = phone online then
       cells = slots.map(s => {
         const start = new Date(s.at).getTime();
         const end = s.posts.reduce((m, p) => Math.max(m, new Date(p.ts).getTime()), start);
         const lo = start - win * 60e3, hi = end + win * 60e3;
         const hit = mine.find(p => { const t = new Date(p.ts).getTime(); return t >= lo && t <= hi; });
-        return hit ? { state:"ok", post:hit } : { state:"asm", post:null };
+        if(hit) return { state:"ok", post:hit };
+        const online = beatMs.some(b => b >= start - COVER && b <= end + COVER);
+        return online ? { state:"maybe", post:null } : { state:"asm", post:null };
       });
     }else{
       /* Nothing collected. For a channel a person can still answer for, each drop carries whatever
@@ -1540,13 +1549,20 @@ function reconcile(channels, opt){
     /* content matching sidesteps this entirely — it never depended on covering the window */
     const partial = mode === "timeline" && all.length > 0 && oldest > from;
 
-    /* Viber (timefold) reports positive evidence only: it is never "short" or "over", because its
-       silence is not a miss and it does not set anyone's target. "seen" means it landed in at least
-       one drop; "unknown" means nothing was forwarded at all. Neither raises a problem. */
+    /* Viber (timefold) never sets anyone's target and is never "over". But it CAN flag a real miss:
+       a drop the phone was online for and still forwarded no post reads "review" and raises a
+       maybe-alert. A drop the phone was offline for is "assumed", which is not a problem. */
+    const maybeAt = mode === "timefold"
+      ? cells.map((x, i) => x.state === "maybe" && slots[i] ? slots[i].time : null).filter(Boolean) : [];
     const status = mode === "none" ? "unknown"
-      : mode === "timefold" ? (n ? "seen" : "unknown")
+      : mode === "timefold" ? (maybeAt.length ? "review" : (n ? "seen" : "unknown"))
       : expected === null ? "notarget"
       : n === expected ? "ok" : n < expected ? "short" : "over";
+
+    if(maybeAt.length)
+      alerts.push({ kind:"maybe", id:c.id, name:c.name,
+        text:`no Viber post for the ${maybeAt.join(", ")} drop${maybeAt.length === 1 ? "" : "s"} ` +
+             `while the phone was online — likely missing, worth a quick check` });
 
     const missedAt = slots.filter(s => s.missing.indexOf(c.id) !== -1).map(s => s.time);
 
@@ -1886,7 +1902,10 @@ const CELL = {
   /* Viber posts alongside every other channel but cannot be read on its own, so a drop that reached
      the rest is assumed to have reached Viber too — a dashed ✓ that a forwarded notification, when
      one arrives, turns into a firm ✓. Never a ✗: a miss here cannot be proven, so it is never invented. */
-  asm:  { g:"✓", cls:"okc",  t:"assumed delivered — posted alongside the others; Viber cannot be read on its own, and a forwarded notification (when one arrives) confirms it" },
+  asm:  { g:"✓", cls:"okc",  t:"assumed delivered — the phone was offline at this drop, so Viber could not be verified; posted alongside the others" },
+  /* Viber only: the phone WAS online at this drop but forwarded no post — a likely real miss,
+     flagged for a quick check rather than assumed away or called a hard cross. */
+  maybe:{ g:"?", cls:"maybe", t:"no Viber post seen while the phone was online — likely missing, worth verifying" },
   miss: { g:"✗", cls:"miss", t:"nothing posted in this drop" },
   lang: { g:"⚠", cls:"lang", t:"posted, but the caption is in the wrong language" },
   none: { g:"·", cls:"none", t:"no data for this channel" },
@@ -2025,8 +2044,12 @@ function dailyCheckModal(o){
           const total = r.mode === "none"
             ? `<span class="dc-pill un">${meta.unsupported ? "n/a" : "—"}</span>`
             : r.mode === "timefold"
-              ? (() => { const conf = r.cells.filter(x => x.state === "ok").length;
-                  return `<span class="dc-pill okc" title="assumed delivered on every drop (posts alongside the others); ${conf} confirmed by a forwarded notification, the rest assumed — Viber cannot be read on its own">${r.count}${conf ? ` · ${conf}✓` : ""}</span>`; })()
+              ? (() => { const conf = r.cells.filter(x => x.state === "ok").length,
+                               mb = r.cells.filter(x => x.state === "maybe").length;
+                  return `<span class="dc-pill ${mb ? "short" : "okc"}" title="${
+                    mb ? mb + " drop(s) not seen while the phone was online — likely missing. " : ""}${
+                    conf} confirmed by a forwarded notification, the rest assumed delivered">${
+                    r.count}${conf ? ` · ${conf}✓` : ""}${mb ? ` · ${mb}⚠` : ""}</span>`; })()
             : r.expected === null ? `<span class="dc-pill un">${r.count}</span>`
             : `<span class="dc-pill ${r.suggested ? "guess" : r.status === "ok" ? "ok"
                 : r.status === "short" ? "short" : "sg"}"${
@@ -2067,7 +2090,9 @@ function dailyCheckModal(o){
                ? `<span><span class="cl ok lt">✓</span> posted, but behind the rest</span>` : ""}
              <span><span class="cl okc">≈</span> same content, matched by caption</span>
              ${rep.rows.some(r => r.mode === "timefold")
-               ? `<span><span class="cl okc">✓</span> assumed delivered — Viber posts alongside the others</span>` : ""}
+               ? `<span><span class="cl okc">✓</span> assumed (phone offline — could not verify Viber)</span>` : ""}
+             ${rep.rows.some(r => r.cells.some(x => x.state === "maybe"))
+               ? `<span><span class="cl maybe">?</span> not seen on Viber while the phone was online — verify</span>` : ""}
              ${rep.rows.some(r => r.cells.some(x => x.askable))
                ? `<span><span class="cl okh">✓</span> confirmed by hand — click these cells</span>` : ""}
              <span><span class="cl miss">✗</span> missing</span>
@@ -2209,7 +2234,8 @@ function dailyCheckModal(o){
           ${r.mode === "none"
             ? `<span class="dc-pill un">${meta.unsupported ? "not supported" : "no data"}</span>`
             : r.mode === "timefold"
-              ? `<span class="dc-pill okc" title="assumed delivered — Viber posts alongside the others and cannot be read on its own">${r.count} assumed${r.cells.filter(x=>x.state==="ok").length ? ` · ${r.cells.filter(x=>x.state==="ok").length}✓` : ""}</span>`
+              ? (() => { const conf = r.cells.filter(x=>x.state==="ok").length, mb = r.cells.filter(x=>x.state==="maybe").length;
+                  return `<span class="dc-pill ${mb?"short":"okc"}" title="${conf} confirmed by notification, ${mb} not seen while online (likely missing), rest assumed">${r.count} delivered${conf?` · ${conf}✓`:""}${mb?` · ${mb}⚠`:""}</span>`; })()
             : `<span class="dc-pill ${r.status === "ok" ? "ok" : r.status === "short" ? "short" : "sg"}">${
                 r.count}${r.expected === null ? "" : "/" + r.expected}</span>`}
           ${r.suggested ? `<span class="dc-pill sg">suggested</span>` : ""}
@@ -2415,10 +2441,12 @@ function dailyCheckModal(o){
           const meta = checks.meta[r.id] || {};
           const v = r.mode === "none"
             ? (meta.unsupported ? "not supported" : meta.dead ? "LINK DEAD" : "no data")
-            : r.mode === "timefold" ? `${r.count} assumed, ${r.cells.filter(x=>x.state==="ok").length} confirmed by notification`
+            : r.mode === "timefold" ? `${r.count} delivered (${r.cells.filter(x=>x.state==="ok").length} confirmed by notification` +
+                (r.cells.filter(x=>x.state==="maybe").length ? `, ${r.cells.filter(x=>x.state==="maybe").length} NOT SEEN while online — verify` : "") + `)`
             : r.expected === null ? `${r.count} (no target)` : `${r.count}/${r.expected}`;
           L.push(`    ${r.status === "ok" ? "ok   " : r.status === "short" ? "SHORT" :
-                        r.status === "over" ? "OVER " : r.status === "seen" ? "seen " : "  -  "} ${r.name} — ${v}` +
+                        r.status === "over" ? "OVER " : r.status === "seen" ? "seen " :
+                        r.status === "review" ? "CHECK" : "  -  "} ${r.name} — ${v}` +
             (r.missedAt.length ? `  (nothing at ${r.missedAt.join(", ")})` : "") +
             (r.suggested ? " [suggested]" : ""));
           /* Say how the number was arrived at, for every mode. Restricting this to "no data" rows
@@ -2605,6 +2633,9 @@ function paintHealth(h){
     sub.innerHTML = "monitor unavailable — could not reach the server";
     return;
   }
+  /* keep the heartbeat log where reconcile can read it: it is what tells a real Viber miss (phone
+     was online at the drop) from an unverifiable one (phone was offline then) */
+  checks.beats = Array.isArray(h.beats) ? h.beats : [];
   const age = h.ageSeconds;
   if(h.lastSeen == null){
     dot.className = "pipe-dot idle";

@@ -104,7 +104,7 @@ async function addPosts(channelId, posts) {
     .sort((a, b) => new Date(b.ts) - new Date(a.ts))
     .slice(0, MAX_PER_CHANNEL);
 
-  all[HB_KEY] = new Date().toISOString();      // a real post is also proof the phone is alive
+  stampBeat(all);                               // a real post is also proof the phone was alive
   await writeAll(all);
   return { added, total: all[channelId].length };
 }
@@ -120,15 +120,35 @@ async function getPosts(channelId) {
    Stored as a reserved key on the same row; getPosts ignores it (it is not an array), and addPosts
    only ever rewrites a single channel's array, so it rides along untouched. */
 const HB_KEY = "__lastSeen";
+/* A rolling log of recent heartbeats, not just the latest. This is what lets the report tell a
+   REAL Viber miss ("the phone was online at that time and still no post came") apart from an
+   unverifiable one ("the phone was offline then, so we cannot say"). Kept to ~2 days, capped, so
+   it stays small enough to ride in the row and the /api/health reply. */
+const BEATS_KEY = "__beats";
+const BEATS_KEEP_MS = 48 * 3600e3;
+const BEATS_MAX = 250;
+function stampBeat(all) {
+  const now = new Date().toISOString();
+  all[HB_KEY] = now;
+  const cut = Date.now() - BEATS_KEEP_MS;
+  const beats = Array.isArray(all[BEATS_KEY]) ? all[BEATS_KEY] : [];
+  beats.push(now);
+  all[BEATS_KEY] = beats.filter(t => new Date(t).getTime() >= cut).slice(-BEATS_MAX);
+  return now;
+}
 async function touch() {
   const all = await readAll();
-  all[HB_KEY] = new Date().toISOString();
+  stampBeat(all);
   await writeAll(all);
   return all[HB_KEY];
 }
 async function lastSeen() {
   const all = await readAll();
   return typeof all[HB_KEY] === "string" ? all[HB_KEY] : null;
+}
+async function beats() {
+  const all = await readAll();
+  return Array.isArray(all[BEATS_KEY]) ? all[BEATS_KEY] : [];
 }
 
 /* Remove everything held for one channel — for clearing test data or a bad push. Returns how many
@@ -141,4 +161,4 @@ async function clear(channelId) {
   return { removed: had };
 }
 
-module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, clear };
+module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, beats, clear };

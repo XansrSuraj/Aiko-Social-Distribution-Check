@@ -859,12 +859,45 @@ console.log("\n── viber never invents a drop and never accuses");
   ];
   const runV = setup => {
     const c = M.checks();
-    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {}; c.captions = {};
+    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {}; c.captions = {}; c.beats = [];
     Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
     setup(c);
     return M.reconcile(VBCH, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
   };
   const rowOf = (rep, id) => rep.rows.find(r => r.id === id);
+
+  /* THE case the whole design turns on: the phone was ONLINE at a drop (a heartbeat near it) and
+     still forwarded no Viber post — that is a real miss, and must be flagged, not assumed away. */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 60, VN_TEXT)];
+      c.posts.tgv = [P("t1", 61, VN_TEXT)];
+      c.posts.vbv = [];                              // Viber forwarded nothing for this drop
+      c.beats = [ago(60), ago(45), ago(30)];         // but the phone was heartbeating right then
+    });
+    const r = rowOf(rep, "vbv");
+    ok(r.cells[0].state === "maybe",
+      "phone ONLINE + no Viber post → ⚠ 'not seen' (a real miss), never a silent assumed ✓",
+      r.cells[0].state);
+    ok(r.status === "review", "the row reads 'review', not a clean 'seen'", r.status);
+    ok(rep.alerts.some(a => a.kind === "maybe" && a.id === "vbv"),
+      "and it raises a maybe-alert so the reader is told to check",
+      JSON.stringify(rep.alerts.filter(a => a.id === "vbv")));
+  }
+
+  /* contrast: same missing post, but the phone was OFFLINE then (no heartbeat) → we cannot verify,
+     so it is assumed, not flagged — no crying wolf for a window the phone could not report on */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 60, VN_TEXT)];
+      c.posts.tgv = [P("t1", 61, VN_TEXT)];
+      c.posts.vbv = [];
+      c.beats = [ago(600)];                          // last heartbeat 10h ago — phone was offline at the drop
+    });
+    const r = rowOf(rep, "vbv");
+    ok(r.cells[0].state === "asm", "phone OFFLINE + no post → assumed (dashed ✓), not flagged", r.cells[0].state);
+    ok(!rep.alerts.some(a => a.id === "vbv"), "and no false alarm is raised");
+  }
 
   /* one real drop (YT + TG together), plus a lone Viber notification two hours off on its own */
   let rep = runV(c => {

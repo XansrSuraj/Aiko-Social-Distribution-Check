@@ -35,10 +35,12 @@ module.exports = async (req, res) => {
 
   const now = new Date();
   let lastSeen = null;
+  let beats = [];
   const channels = [];
 
   try {
     lastSeen = await store.lastSeen();
+    try { beats = await store.beats(); } catch (e) { beats = []; }
     for (const c of COMMUNITIES) {
       let posts = [];
       try { posts = await store.getPosts(c.channelId); } catch (e) { posts = []; }
@@ -67,5 +69,8 @@ module.exports = async (req, res) => {
     ageSeconds,
     configured: store.configured(),
     channels,
+    /* the heartbeat log — the dashboard uses it to tell a real Viber miss (phone was online then)
+       from an unverifiable one (phone was offline then) */
+    beats,
   });
 };
