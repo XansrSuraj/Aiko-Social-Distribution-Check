@@ -1339,7 +1339,7 @@ function reconcile(channels, opt){
   /* Offered only where reading genuinely failed, never as a shortcut around a channel that can be
      read — a tick beside a collector that merely had a bad morning would paper over the outage
      this report exists to surface. */
-  const canConfirm = c => !posts[c.id].length && !bagOf(c).length && !countFor(c.id);
+  const canConfirm = c => !foldsByTime(c) && !posts[c.id].length && !bagOf(c).length && !countFor(c.id);
 
   /* A content-matched channel is never fallen back to timeline matching, even when it does have
      timestamps. Facebook's timestamps are real for the posts it hands over, but its coverage of a
@@ -1352,8 +1352,10 @@ function reconcile(channels, opt){
     ? (bagOf(c).length ? "content" : (countFor(c.id) ? "count"
        : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")))
     : foldsByTime(c)
-    ? (posts[c.id].length ? "timefold" : (countFor(c.id) ? "count"
-       : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")))
+    ? "timefold"          /* Viber is ALWAYS auto: a notification confirms a drop, and any drop it
+                             did not is assumed delivered (content goes out to every channel at
+                             once). It never needs a hand-tick — the whole point of the phone
+                             pipeline is that nothing here is manual. */
     : (posts[c.id].length ? "timeline" : (countFor(c.id) ? "count"
        : (confirmsFor(c.id).some(Boolean) ? "confirm" : "none")));
   const countOf = c => {

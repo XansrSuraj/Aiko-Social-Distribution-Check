@@ -690,10 +690,13 @@ ok(phantom.slots[0].present.indexOf("fbv") !== -1,
    of revealing one. */
 console.log("\n── a channel answered by hand");
 
+/* Facebook is the hand-confirm case now: when its extension has not run it has no captions to
+   match on, so it falls to "answer by hand". (Viber used to sit here, but it is automatic now —
+   fed by the phone pipeline — so it is never answered by hand; that is covered in its own block.) */
 const HC = [
   { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
   { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
-  { id: "vbv", platform: "viber",    name: "Viber · vn",    lang: "vi" },
+  { id: "fbv", platform: "facebook", name: "Facebook · vn", lang: "vi" },
 ];
 /* built once and reused: P() stamps "N minutes before now", so rebuilding them per run would move
    every drop and the ticks — which are keyed on the drop's instant — would land on nothing */
@@ -710,16 +713,16 @@ const handRun = confirms => {
 let hr = handRun();
 const drops = hr.slots.map(s => s.at);
 ok(hr.slots.length === 2, "two drops from the channels that can be read", `${hr.slots.length}`);
-ok(hr.rows.find(r => r.id === "vbv").mode === "none",
-  "an unticked Viber reads no-data, never missing", hr.rows.find(r => r.id === "vbv").mode);
-ok(hr.rows.find(r => r.id === "vbv").cells.every(x => x.askable === true),
+ok(hr.rows.find(r => r.id === "fbv").mode === "none",
+  "an unread Facebook reads no-data, never missing", hr.rows.find(r => r.id === "fbv").mode);
+ok(hr.rows.find(r => r.id === "fbv").cells.every(x => x.askable === true),
   "and every one of its cells offers to be answered",
-  JSON.stringify(hr.rows.find(r => r.id === "vbv").cells.map(x => x.askable)));
-ok(!hr.alerts.some(a => a.id === "vbv"), "it raises no alarm while nobody has looked");
+  JSON.stringify(hr.rows.find(r => r.id === "fbv").cells.map(x => x.askable)));
+ok(!hr.alerts.some(a => a.id === "fbv"), "it raises no alarm while nobody has looked");
 
 /* the reader ticks the first drop as delivered and marks the second as genuinely absent */
-hr = handRun({ vbv: { [drops[0]]: true, [drops[1]]: false } });
-const vrow = hr.rows.find(r => r.id === "vbv");
+hr = handRun({ fbv: { [drops[0]]: true, [drops[1]]: false } });
+const vrow = hr.rows.find(r => r.id === "fbv");
 ok(vrow.mode === "confirm", "once ticked it is answered, not blank", vrow.mode);
 ok(vrow.cells[0].state === "okh" && vrow.cells[1].state === "miss",
   "a tick reads as posted and a cross as missing",
@@ -733,10 +736,10 @@ ok(vrow.cells[0].state !== "ok",
    it set the target would be circular — and a channel ticked on every drop must not raise the bar
    for everybody else. */
 ok(hr.expected === 2, "a hand tick never sets the day's target", `expected=${hr.expected}`);
-hr = handRun({ vbv: { [drops[0]]: true, [drops[1]]: true } });
-ok(hr.expected === 2 && hr.rows.find(r => r.id === "vbv").status === "ok",
+hr = handRun({ fbv: { [drops[0]]: true, [drops[1]]: true } });
+ok(hr.expected === 2 && hr.rows.find(r => r.id === "fbv").status === "ok",
   "ticking every drop reads ok without moving the target",
-  `expected=${hr.expected} ${hr.rows.find(r => r.id === "vbv").status}`);
+  `expected=${hr.expected} ${hr.rows.find(r => r.id === "fbv").status}`);
 
 /* a channel that CAN be read must never be answered by hand — that would paper over an outage */
 ok(hr.rows.find(r => r.id === "tgv").cells.every(x => !x.askable),
@@ -898,10 +901,14 @@ console.log("\n── viber never invents a drop and never accuses");
     c.posts.tgv = [P("t1", 61, VN_TEXT)];
     c.posts.vbv = [];                                  // nothing forwarded from Viber at all
   });
-  ok(rowOf(rep, "vbv").mode !== "timefold",
-    "with nothing forwarded, Viber is 'unknown', not a timefold row of crosses",
+  ok(rowOf(rep, "vbv").mode === "timefold",
+    "Viber is ALWAYS automatic (timefold) — never a manual hand-confirm row",
     rowOf(rep, "vbv").mode);
-  ok(rowOf(rep, "vbv").status === "unknown", "and its status is unknown", rowOf(rep, "vbv").status);
+  ok(rowOf(rep, "vbv").cells.every(c => c.state === "asm"),
+    "with nothing forwarded, its drops are assumed delivered (✓), not crosses and not blanks-to-tick",
+    rowOf(rep, "vbv").cells.map(c => c.state).join(","));
+  ok(!rowOf(rep, "vbv").cells.some(c => c.askable),
+    "no cell is a hand-confirm control — nothing here is ever manual");
   ok(!rep.alerts.some(a => a.id === "vbv"), "no alert accuses Viber of a miss",
     JSON.stringify(rep.alerts.filter(a => a.id === "vbv")));
 
