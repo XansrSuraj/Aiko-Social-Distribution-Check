@@ -962,6 +962,52 @@ console.log("\n── viber never invents a drop and never accuses");
     const cells = rowOf(rep, "vbv").cells.map(c => c.state).sort().join(",");
     ok(cells === "asm,ok", "one drop is confirmed (✓), the other assumed (✓) — neither is a miss", cells);
   }
+
+  /* THE real-world case the user hit: Viber delivered as many posts as there were broadcasts, but
+     at its OWN times (independent posting + notification drift), so almost none line up with the
+     other channels' drops. By COUNT it is complete, so it must NOT flag a pile of false misses. */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 300, VN_TEXT), P("y2", 200, VN_TEXT), P("y3", 100, VN_TEXT), P("y4", 40, VN_TEXT)];
+      c.posts.tgv = [P("t1", 301, VN_TEXT), P("t2", 201, VN_TEXT), P("t3", 101, VN_TEXT), P("t4", 41, VN_TEXT)];
+      // 4 Viber posts, but all at times that fall BETWEEN the drops (never within ±15m of one)
+      c.posts.vbv = [260, 160, 70, 20].map((m, i) => ({ externalId:"v"+i, ts:ago(m), kind:"video", text:"Sportsfc.vn: Video message" }));
+      c.beats = [300, 260, 200, 160, 100, 70, 40, 20].map(m => ago(m));   // phone online throughout
+    });
+    const r = rowOf(rep, "vbv");
+    ok(r.count === 4 && !r.cells.some(x => x.state === "maybe"),
+      "4 posts delivered for 4 broadcasts → NO false ⚠, even though times do not line up",
+      `count=${r.count} states=${r.cells.map(x => x.state).join(",")}`);
+    ok(!rep.alerts.some(a => a.id === "vbv"), "and no false 'likely missing' alert is raised");
+  }
+
+  /* contrast: a GENUINE shortage — only 2 posts for 4 broadcasts, phone online → 2 flagged */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 300, VN_TEXT), P("y2", 200, VN_TEXT), P("y3", 100, VN_TEXT), P("y4", 40, VN_TEXT)];
+      c.posts.tgv = [P("t1", 301, VN_TEXT), P("t2", 201, VN_TEXT), P("t3", 101, VN_TEXT), P("t4", 41, VN_TEXT)];
+      c.posts.vbv = [{ externalId:"v1", ts:ago(300), kind:"video", text:"x" }, { externalId:"v2", ts:ago(200), kind:"video", text:"x" }];
+      c.beats = [300, 200, 100, 40].map(m => ago(m));
+    });
+    const r = rowOf(rep, "vbv");
+    ok(r.count === 2 && r.cells.filter(x => x.state === "maybe").length === 2,
+      "2 of 4 delivered → exactly 2 drops flagged ⚠ (the real shortfall)",
+      `count=${r.count} states=${r.cells.map(x => x.state).join(",")}`);
+    ok(rep.alerts.some(a => a.kind === "maybe" && a.id === "vbv"), "and a maybe-alert names the likely-missing drops");
+  }
+
+  /* duplicate notifications ("Unknown" + the name, same minute) are ONE post, not two */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 60, VN_TEXT)];
+      c.posts.tgv = [P("t1", 61, VN_TEXT)];
+      c.posts.vbv = [{ externalId:"a", ts:ago(58), kind:"video", text:"Unknown: Video message" },
+                     { externalId:"b", ts:ago(58), kind:"video", text:"Sportsfc.vn: Video message" }];
+      c.beats = [ago(60)];
+    });
+    ok(rowOf(rep, "vbv").count === 1, "two notifications one minute apart count as a single delivered post",
+      String(rowOf(rep, "vbv").count));
+  }
 }
 
 console.log(`\n  ${pass} passed, ${fail} failed`);

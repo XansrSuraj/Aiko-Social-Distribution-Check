@@ -354,14 +354,23 @@ function tgParse(html, channel) {
     const body = p.slice(0, 20000);
     const dt = (body.match(/datetime="([^"]+)"/) || [])[1];
     if (!dt) continue;
+    /* Telegram interleaves SERVICE notices into the public preview — "Channel photo updated", a
+       pin, a name change — each with its own message id and time. They are not content: filing one
+       as a post invented a phantom drop that read as "every channel missed it" (the 13:00 case).
+       Skip them, by the service CSS class or the canonical service wording (which stays English
+       even on localized channels). */
     const txt = (body.match(/tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/) || [])[1] || "";
+    const text0 = stripHtml(txt);
+    if (/tgme_widget_message_service/.test(body.slice(0, 1500)) ||
+        /^\s*(channel|group)\s+(photo|name|title)\b|^\s*channel created\b|^\s*pinned\b|video chat|voice chat/i.test(text0))
+      continue;
     const dur = (body.match(/message_video_duration[^>]*>([^<]*)</) || [])[1] || "";
     out.push({
       externalId: idm[1],
       ts: dt,
       kind: /tgme_widget_message_video/.test(body) ? "video"
           : /tgme_widget_message_photo/.test(body) ? "photo" : "text",
-      text: stripHtml(txt),
+      text: text0,
       views: views((body.match(/tgme_widget_message_views[^>]*>([^<]*)</) || [])[1]),
       duration: mmss(dur),
       thumb: (body.match(/message_video_thumb[^"]*"[^>]*background-image:url\('([^']+)'/) || [])[1]
