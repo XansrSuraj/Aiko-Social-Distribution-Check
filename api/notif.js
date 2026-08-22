@@ -151,10 +151,18 @@ module.exports = async (req, res) => {
   }
 
   const ts = toIso(pick("postedAt", "when", "date", "message_date", "time", "timestamp"));
-  /* id from channel + minute + the words, so the same post arriving twice (a re-notify, a sync)
-     collapses instead of counting twice — the store dedupes on it */
+  /* The id decides what counts as "the same post". Viber posts one notification and then UPDATES it
+     when the sender name resolves, so the very same video arrives twice — once as "Unknown: Video
+     message" and once as "Sportsfc.vn: Video message", often a minute apart. Two things make those
+     collapse instead of double-counting:
+       · strip the "<sender>:" prefix (the only part that differs between the two), and
+       · bucket the time to 3 minutes, so a re-notify that crosses a minute boundary still lands on
+         the same id (real Viber posts are spaced far wider than this, so distinct ones never merge). */
+  const reEsc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idText = text.replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim() || text;
+  const bucket = Math.floor(new Date(ts).getTime() / (3 * 60e3));
   const externalId = "notif-" + crypto.createHash("sha1")
-    .update(hit.channelId + "|" + ts.slice(0, 16) + "|" + text).digest("hex").slice(0, 16);
+    .update(hit.channelId + "|" + bucket + "|" + idText).digest("hex").slice(0, 16);
 
   try {
     const out = await store.addPosts(hit.channelId, [{ externalId, ts, text, kind: "post" }]);

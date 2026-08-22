@@ -68,6 +68,19 @@ function call(body) {
     text: "Arsenal đối đầu Manchester City", postedAt: String(now) });
   check(r.body.added === 0 && r.body.total === 1, "a re-notify collapses", JSON.stringify(r.body));
 
+  /* Viber updates a community notification when the sender name resolves, so the SAME video post
+     arrives once as "Unknown: …" and once as "<Community>: …", a minute or so apart. Both must
+     collapse to one — the double entries the report showed were exactly this. */
+  console.log("\n── an 'Unknown → name' re-notify of the same post collapses");
+  r = await call({ app: "Viber", title: "Sportsfc.vn",
+    text: "Sportsfc.vn: Video message", postedAt: String(now + 5 * 60e3) });
+  const afterFirst = r.body.total;
+  r = await call({ app: "Viber", title: "Sportsfc.vn",
+    text: "Unknown: Video message", postedAt: String(now + 5 * 60e3 + 40e3) });   // 40s later, sender differs
+  check(r.body.added === 0 && r.body.total === afterFirst,
+    "'Unknown: Video message' + 'Sportsfc.vn: Video message' near the same time = ONE post",
+    JSON.stringify(r.body));
+
   console.log("\n── what must never be filed as a post");
   r = await call({ app: "Viber", title: "Sportsfc.vn", text: "3 new messages" });
   check(r.body.ignored && /bundle/.test(r.body.ignored),
@@ -88,7 +101,7 @@ function call(body) {
     "a 'name: sender' title still routes to the right community", JSON.stringify(r.body));
 
   console.log("\n── nothing watched leaks between communities");
-  check((await store.getPosts("viber:sportsfc.vn")).length === 2 &&
+  check((await store.getPosts("viber:sportsfc.vn")).length === 3 &&   // Arsenal + the dedup test's video + Sevilla
         (await store.getPosts("viber:sportsfc.fans")).length === 1,
     "each community holds only its own posts");
 
