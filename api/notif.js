@@ -119,6 +119,16 @@ module.exports = async (req, res) => {
   const title = String(pick("title", "from", "message_from", "conversation") || "").trim();
   const text = String(pick("text", "body", "message_body", "message") || "").replace(/\\n/g, "\n").trim();
 
+  /* TEMP DEBUG — capture every raw hit so we can see exactly what Tasker sends (remove after). */
+  try {
+    await store.addPosts("__debug", [{
+      externalId: "dbg-" + Date.now() + "-" + Math.round(Math.random() * 9999),
+      ts: new Date().toISOString(),
+      text: JSON.stringify({ app: String(app).slice(0, 24), title: title.slice(0, 40),
+        text: text.slice(0, 40), postedAt: String(pick("postedAt", "when", "date", "message_date", "time", "timestamp")).slice(0, 30) }),
+    }]);
+  } catch (e) {}
+
   /* Any authenticated hit is proof the phone's forwarder is alive — record it so the dashboard's
      monitor can tell "connected" from "went silent, since when". Never let a store hiccup fail the
      reply (the forwarder must always get its 200). A real post refreshes this via addPosts instead. */
