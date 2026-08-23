@@ -119,16 +119,6 @@ module.exports = async (req, res) => {
   const title = String(pick("title", "from", "message_from", "conversation") || "").trim();
   const text = String(pick("text", "body", "message_body", "message") || "").replace(/\\n/g, "\n").trim();
 
-  /* TEMP DEBUG — capture every raw hit so we can see exactly what Tasker sends (remove after). */
-  try {
-    await store.addPosts("__debug", [{
-      externalId: "dbg-" + Date.now() + "-" + Math.round(Math.random() * 9999),
-      ts: new Date().toISOString(),
-      text: JSON.stringify({ app: String(app).slice(0, 24), title: title.slice(0, 40),
-        text: text.slice(0, 40), postedAt: String(pick("postedAt", "when", "date", "message_date", "time", "timestamp")).slice(0, 30) }),
-    }]);
-  } catch (e) {}
-
   /* Any authenticated hit is proof the phone's forwarder is alive — record it so the dashboard's
      monitor can tell "connected" from "went silent, since when". Never let a store hiccup fail the
      reply (the forwarder must always get its 200). A real post refreshes this via addPosts instead. */
@@ -169,12 +159,26 @@ module.exports = async (req, res) => {
        · bucket the time to 3 minutes, so a re-notify that crosses a minute boundary still lands on
          the same id (real Viber posts are spaced far wider than this, so distinct ones never merge). */
   const reEsc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const idText = text.replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim() || text;
+  const stripSender = t => String(t || "").replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim();
+  const idText = stripSender(text) || text;
   const bucket = Math.floor(new Date(ts).getTime() / (3 * 60e3));
   const externalId = "notif-" + crypto.createHash("sha1")
     .update(hit.channelId + "|" + bucket + "|" + idText).digest("hex").slice(0, 16);
 
   try {
+    /* Proximity dedupe, boundary-free: the same post reaches this door several times — an
+       "Unknown → name" re-notify, and the real-time Intercept plus (if used) the periodic sweep
+       both seeing it, each with a slightly different clock. If the same words already sit within a
+       few minutes, this is that post again — collapse it. Real Viber posts are spaced far wider, so
+       genuinely distinct ones are never merged. */
+    const DEDUP_MS = 6 * 60e3;
+    const existing = await store.getPosts(hit.channelId);
+    const already = existing.some(p =>
+      stripSender(p.text) === idText && Math.abs(new Date(p.ts).getTime() - new Date(ts).getTime()) <= DEDUP_MS);
+    if (already) {
+      return res.status(200).json({ ok: true, channelId: hit.channelId, added: 0, total: existing.length,
+        deduped: "same post already within 6 min" });
+    }
     const out = await store.addPosts(hit.channelId, [{ externalId, ts, text, kind: "post" }]);
     return res.status(200).json({ ok: true, channelId: hit.channelId, ...out });
   } catch (err) {
