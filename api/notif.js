@@ -137,51 +137,60 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, ignored: "not a Viber notification", app: String(app) });
   }
 
+  /* From here it IS a Viber notification. Whatever happens to it — stored, ignored, a bundle, a
+     duplicate — it is recorded RAW in the live log (with its outcome) so the dashboard can show
+     exactly what the phone forwarded, in real time. */
+  const rawPostedAt = String(pick("postedAt", "when", "date", "message_date", "time", "timestamp") || "");
+  const ts = toIso(rawPostedAt);
   const hay = (title + " " + text).toLowerCase();
   const hit = COMMUNITIES.find(c => hay.includes(c.name));
-  if (!hit) {
-    await beat();
-    return res.status(200).json({ ok: true, ignored: "no watched community matched",
-      title, watching: COMMUNITIES.map(c => c.name) });
-  }
-  if (!text || BUNDLE.test(text)) {
-    await beat();
-    return res.status(200).json({ ok: true, ignored: "bundle or empty — no single post to file",
-      channelId: hit.channelId, text });
-  }
 
-  const ts = toIso(pick("postedAt", "when", "date", "message_date", "time", "timestamp"));
   /* The id decides what counts as "the same post". Viber posts one notification and then UPDATES it
-     when the sender name resolves, so the very same video arrives twice — once as "Unknown: Video
-     message" and once as "Sportsfc.vn: Video message", often a minute apart. Two things make those
-     collapse instead of double-counting:
-       · strip the "<sender>:" prefix (the only part that differs between the two), and
-       · bucket the time to 3 minutes, so a re-notify that crosses a minute boundary still lands on
-         the same id (real Viber posts are spaced far wider than this, so distinct ones never merge). */
+     when the sender name resolves, so the same video arrives twice — "Unknown: Video message" and
+     "Sportsfc.vn: Video message", a minute apart. Strip the "<sender>:" prefix (the only part that
+     differs) so both collapse; a 6-minute proximity check then absorbs a re-notify that drifted. */
   const reEsc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const stripSender = t => String(t || "").replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim();
-  const idText = stripSender(text) || text;
-  const bucket = Math.floor(new Date(ts).getTime() / (3 * 60e3));
-  const externalId = "notif-" + crypto.createHash("sha1")
-    .update(hit.channelId + "|" + bucket + "|" + idText).digest("hex").slice(0, 16);
+  const stripSender = t => !hit ? String(t || "").trim()
+    : String(t || "").replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim();
 
-  try {
-    /* Proximity dedupe, boundary-free: the same post reaches this door several times — an
-       "Unknown → name" re-notify, and the real-time Intercept plus (if used) the periodic sweep
-       both seeing it, each with a slightly different clock. If the same words already sit within a
-       few minutes, this is that post again — collapse it. Real Viber posts are spaced far wider, so
-       genuinely distinct ones are never merged. */
-    const DEDUP_MS = 6 * 60e3;
-    const existing = await store.getPosts(hit.channelId);
-    const already = existing.some(p =>
-      stripSender(p.text) === idText && Math.abs(new Date(p.ts).getTime() - new Date(ts).getTime()) <= DEDUP_MS);
-    if (already) {
-      return res.status(200).json({ ok: true, channelId: hit.channelId, added: 0, total: existing.length,
-        deduped: "same post already within 6 min" });
+  let outcome, response;
+  if (!hit) {
+    outcome = "ignored — not a watched community";
+    response = { ok: true, ignored: "no watched community matched", title, watching: COMMUNITIES.map(c => c.name) };
+  } else if (!text || BUNDLE.test(text)) {
+    outcome = "skipped — bundle / no caption";
+    response = { ok: true, ignored: "bundle or empty — no single post to file", channelId: hit.channelId, text };
+  } else {
+    const idText = stripSender(text) || text;
+    const bucket = Math.floor(new Date(ts).getTime() / (3 * 60e3));
+    const externalId = "notif-" + crypto.createHash("sha1")
+      .update(hit.channelId + "|" + bucket + "|" + idText).digest("hex").slice(0, 16);
+    try {
+      const DEDUP_MS = 6 * 60e3;
+      const existing = await store.getPosts(hit.channelId);
+      const already = existing.some(p =>
+        stripSender(p.text) === idText && Math.abs(new Date(p.ts).getTime() - new Date(ts).getTime()) <= DEDUP_MS);
+      if (already) {
+        outcome = "duplicate — already have this one";
+        response = { ok: true, channelId: hit.channelId, added: 0, total: existing.length, deduped: "same post already within 6 min" };
+      } else {
+        const out = await store.addPosts(hit.channelId, [{ externalId, ts, text, kind: "post" }]);
+        outcome = "stored";
+        response = { ok: true, channelId: hit.channelId, ...out };
+      }
+    } catch (err) {
+      outcome = "error";
+      response = { ok: false, error: String((err && err.message) || err) };
     }
-    const out = await store.addPosts(hit.channelId, [{ externalId, ts, text, kind: "post" }]);
-    return res.status(200).json({ ok: true, channelId: hit.channelId, ...out });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: String((err && err.message) || err) });
   }
+
+  /* record the raw notification + outcome for the live log (also stamps the heartbeat) */
+  try {
+    await store.logNotif({
+      at: new Date().toISOString(), title, text, postedAt: rawPostedAt, ts,
+      community: hit ? hit.channelId : "", outcome,
+    });
+  } catch (e) { await beat(); }
+
+  return res.status(response.ok === false ? 500 : 200).json(response);
 };

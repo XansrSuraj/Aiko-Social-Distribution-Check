@@ -618,6 +618,41 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .pipe-chan.stale .pcd{background:#f59e0b}
 @media(prefers-reduced-motion:reduce){.pipe-dot::after{animation:none!important}}
 
+/* ── Viber live log ── */
+.vlog{background:var(--surf);border:1px solid var(--ln);border-radius:var(--rl);box-shadow:var(--s2);
+  padding:clamp(16px,3.5vw,22px);margin-top:8px}
+.vlog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
+.vlog-title{display:flex;align-items:center;gap:9px;font-family:inherit;font-weight:800;font-size:16px;letter-spacing:-.01em}
+.vlog-live{width:9px;height:9px;border-radius:50%;background:#22c55e;flex:none;position:relative}
+.vlog-live::after{content:"";position:absolute;inset:0;border-radius:50%;background:#22c55e;animation:pipepulse 1.8s ease-out infinite}
+.vlog-sub{font-size:12.5px;color:var(--tx3);margin-top:3px}
+.vlog-refresh{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:650;
+  color:var(--tx2);background:var(--surf2);border:1px solid var(--ln);border-radius:10px;padding:8px 13px;cursor:pointer;flex:none;
+  transition:border-color .15s,color .15s}
+.vlog-refresh:hover{color:var(--tx);border-color:color-mix(in srgb,var(--a1) 40%,var(--ln))}
+.vlog-refresh svg{width:15px;height:15px}
+.vlog-refresh.spin svg{animation:vspin .8s linear infinite}
+@keyframes vspin{to{transform:rotate(360deg)}}
+.vlog-list{display:flex;flex-direction:column;gap:8px;max-height:440px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+.vlog-empty{color:var(--tx3);font-size:14px;text-align:center;padding:26px 10px;line-height:1.6}
+.vlog-row{display:flex;align-items:flex-start;gap:12px;background:var(--surf2);border:1px solid var(--ln);
+  border-radius:12px;padding:12px 14px}
+.vlog-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px;background:var(--tx3)}
+.vlog-dot.ok{background:#22c55e} .vlog-dot.dup{background:var(--tx3)} .vlog-dot.warn{background:#f59e0b} .vlog-dot.dim{background:var(--tx3)}
+.vlog-main{flex:1;min-width:0}
+.vlog-line1{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.vlog-comm{font-weight:700;font-size:13.5px;color:var(--a1);background:color-mix(in srgb,var(--a1) 12%,transparent);
+  padding:2px 9px;border-radius:999px;flex:none}
+.vlog-comm.none{color:var(--tx3);background:var(--surf3)}
+.vlog-text{font-size:14px;color:var(--tx);overflow-wrap:anywhere}
+.vlog-line2{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:6px}
+.vlog-chip{font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 9px;border-radius:999px}
+.vlog-chip.ok{color:#15803d;background:color-mix(in srgb,#22c55e 15%,transparent)}
+.vlog-chip.warn{color:#b45309;background:color-mix(in srgb,#f59e0b 16%,transparent)}
+.vlog-chip.dup,.vlog-chip.dim{color:var(--tx2);background:var(--surf3)}
+.vlog-meta{font-size:12px;color:var(--tx3);font-variant-numeric:tabular-nums}
+.vlog-ago{font-size:12px;color:var(--tx3);white-space:nowrap;flex:none;font-variant-numeric:tabular-nums}
+
 @media(max-width:560px){
   .dash{padding:20px 15px 44px}
   .hero-card{padding:28px 22px 26px}
@@ -2607,6 +2642,17 @@ function render(){
             <div class="ch-grid">${groups[lg].map(chanCard).join("")}</div>
           </div>`).join("")}
       </section>
+
+      <section class="vlog" id="vlog">
+        <div class="vlog-head">
+          <div class="vlog-titles">
+            <div class="vlog-title"><span class="vlog-live"></span> Viber live log</div>
+            <div class="vlog-sub" id="vlogSub">everything your phone forwards · updates on its own</div>
+          </div>
+          <button class="vlog-refresh" id="vlogRefresh" title="Refresh now"><i data-lucide="refresh-cw"></i> Refresh</button>
+        </div>
+        <div class="vlog-list" id="vlogList"><div class="vlog-empty">Loading…</div></div>
+      </section>
     </div>`;
 
   const when = document.getElementById("heroWhen");
@@ -2615,10 +2661,70 @@ function render(){
 
   icons(app);
   pollHealth();
+  pollNotifLog();
+  const vr = document.getElementById("vlogRefresh");
+  if(vr) vr.onclick = () => { vr.classList.add("spin"); pollNotifLog(true); };
   if(!booting){
     anim(".hero-card", { y:16, opacity:0, duration:.4 });
     anim(".ch-card", { y:14, opacity:0, stagger:.02, duration:.34 });
   }
+}
+
+/* ── Viber live log ────────────────────────────────────────────────────────
+   A real-time feed of exactly what the phone forwards for Viber — polled every few seconds so it
+   stays current on its own, with a manual refresh as a fallback. Shows each notification's words,
+   which community it hit, when the phone sent it, and what the tool did with it. */
+let vlogTimer = null;
+const VLOG_OUTCOME = {
+  "stored":                      { cls:"ok",   label:"stored" },
+  "duplicate — already have this one": { cls:"dup", label:"duplicate" },
+  "skipped — bundle / no caption":     { cls:"warn", label:"bundle / no caption" },
+  "ignored — not a watched community": { cls:"warn", label:"not a watched community" },
+};
+async function pollNotifLog(manual){
+  clearTimeout(vlogTimer);
+  try{
+    const j = await (await fetch("api/notiflog", { cache:"no-store" })).json();
+    renderNotifLog(j && j.log ? j.log : []);
+  }catch(e){ /* keep whatever is shown */ }
+  const vr = document.getElementById("vlogRefresh"); if(vr) vr.classList.remove("spin");
+  vlogTimer = setTimeout(pollNotifLog, 5000);          // real-time-ish, self-updating
+}
+function renderNotifLog(log){
+  const list = document.getElementById("vlogList"); if(!list) return;
+  const sub = document.getElementById("vlogSub");
+  if(sub) sub.textContent = log.length
+    ? `${log.length} recent · latest ${new Date(log[0].at).toLocaleTimeString()}`
+    : "everything your phone forwards · updates on its own";
+  if(!log.length){
+    list.innerHTML = `<div class="vlog-empty">No Viber notifications yet. When your phone forwards one, it appears here within seconds.</div>`;
+    return;
+  }
+  const commName = id => (id || "").replace(/^viber:/, "") || "—";
+  list.innerHTML = log.map(e => {
+    const o = VLOG_OUTCOME[e.outcome] || { cls:"dim", label:e.outcome || "seen" };
+    const at = new Date(e.at);
+    const recv = at.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+    const rel = agoStr(Math.max(0, Math.round((Date.now() - at.getTime()) / 1000)));
+    const sent = e.postedAt ? String(e.postedAt) : "";
+    const sentNice = e.ts ? new Date(e.ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }) : "";
+    return `<div class="vlog-row">
+      <span class="vlog-dot ${o.cls}"></span>
+      <div class="vlog-main">
+        <div class="vlog-line1">
+          ${e.community ? `<span class="vlog-comm">${esc(commName(e.community))}</span>` : `<span class="vlog-comm none">no match</span>`}
+          <span class="vlog-text">${esc(e.text || "(no text)")}</span>
+        </div>
+        <div class="vlog-line2">
+          <span class="vlog-chip ${o.cls}">${esc(o.label)}</span>
+          ${sentNice ? `<span class="vlog-meta">sent ${esc(sentNice)}</span>` : ""}
+          <span class="vlog-meta">received ${esc(recv)}</span>
+        </div>
+      </div>
+      <span class="vlog-ago">${esc(rel)}</span>
+    </div>`;
+  }).join("");
+  icons(list);
 }
 
 /* ── phone / pipeline monitor ──────────────────────────────────────────────

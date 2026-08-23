@@ -151,6 +151,24 @@ async function beats() {
   return Array.isArray(all[BEATS_KEY]) ? all[BEATS_KEY] : [];
 }
 
+/* A rolling log of the RAW notifications the phone forwards for Viber — exactly what it sent, with
+   the outcome (stored / ignored / bundle). This is what the dashboard's live-log panel reads, so a
+   person can watch, in real time, everything their phone is sending. Newest first, capped small. */
+const LOG_KEY = "__notiflog";
+const LOG_MAX = 80;
+async function logNotif(entry) {
+  const all = await readAll();
+  const log = Array.isArray(all[LOG_KEY]) ? all[LOG_KEY] : [];
+  log.unshift(entry);
+  all[LOG_KEY] = log.slice(0, LOG_MAX);
+  stampBeat(all);                                 // a forwarded notification is also proof it is alive
+  await writeAll(all);
+}
+async function notifLog() {
+  const all = await readAll();
+  return Array.isArray(all[LOG_KEY]) ? all[LOG_KEY] : [];
+}
+
 /* Remove everything held for one channel — for clearing test data or a bad push. Returns how many
    were dropped. The heartbeat and other channels are left untouched. */
 async function clear(channelId) {
@@ -161,4 +179,4 @@ async function clear(channelId) {
   return { removed: had };
 }
 
-module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, beats, clear };
+module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, beats, logNotif, notifLog, clear };
