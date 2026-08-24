@@ -169,6 +169,23 @@ async function notifLog() {
   return Array.isArray(all[LOG_KEY]) ? all[LOG_KEY] : [];
 }
 
+/* A tiny shared cache, kept in the same row. Used to avoid paying for the same read twice: an X
+   fetch through a paid API is cached for a few minutes, so several "Run daily check" clicks in a
+   row cost one call, not one each. cacheGet returns null once the value is older than maxAgeMs. */
+const CACHE_KEY = "__cache";
+async function cacheGet(name, maxAgeMs) {
+  const all = await readAll();
+  const c = (all[CACHE_KEY] || {})[name];
+  if (c && typeof c.at === "number" && Date.now() - c.at <= maxAgeMs) return c.value;
+  return null;
+}
+async function cacheSet(name, value) {
+  const all = await readAll();
+  all[CACHE_KEY] = all[CACHE_KEY] || {};
+  all[CACHE_KEY][name] = { at: Date.now(), value };
+  await writeAll(all);
+}
+
 /* Remove everything held for one channel — for clearing test data or a bad push. Returns how many
    were dropped. The heartbeat and other channels are left untouched. */
 async function clear(channelId) {
@@ -179,4 +196,4 @@ async function clear(channelId) {
   return { removed: had };
 }
 
-module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, beats, logNotif, notifLog, clear };
+module.exports = { addPosts, getPosts, readAll, writeAll, configured, MAX_DAYS, touch, lastSeen, beats, logNotif, notifLog, cacheGet, cacheSet, clear };

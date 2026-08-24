@@ -233,6 +233,69 @@ const VN2 = "🐐 Tuổi tác chỉ là một con số với Cristiano Ronaldo. 
     check(calls.some(u => u.includes("scraper.test")), "the proxy URL was actually fetched", `calls=${calls.length}`);
   }
 
+  console.log("\n── twitterapi.io reads X server-side (the paid, reliable path)");
+  {
+    /* twitterapi.io answers with JSON, not the profile HTML: { data: { tweets: [ … ] } }, each
+       tweet carrying createdAt / viewCount / likeCount / replyCount / retweetCount and a url. */
+    const H = "sfc_apitest";           // a fresh handle so no earlier file-cache entry can leak in
+    const tw = (id, mins, text, opts) => Object.assign({
+      id, url: `https://x.com/${H}/status/${id}`, text, createdAt: ago(mins),
+      viewCount: 100, likeCount: 5, replyCount: 2, retweetCount: 1,
+    }, opts || {});
+    const apiBody = JSON.stringify({ status: "success", data: { tweets: [
+      tw("5001", 30, VN),
+      tw("5002", 120, "RT @someone: not our own post"),                        // retweet — must drop
+      tw("5003", 200, "@another and a reply"),                                 // reply — must drop
+      tw("5004", 300, VN2, { extendedEntities: { media: [{ type: "video", media_url_https: "https://pbs.twimg.com/v.jpg" }] } }),
+    ] } });
+
+    const calls = [];
+    let sentKey = null;
+    global.fetch = async (url, opt) => {
+      calls.push(String(url));
+      if (String(url).includes("api.twitterapi.io")) {
+        const h = (opt && opt.headers) || {};
+        sentKey = h["X-API-Key"] || h["x-api-key"] || null;
+        return { status: 200, text: async () => apiBody };
+      }
+      return { status: 200, text: async () => "<html>the blocked page — must not be used</html>" };
+    };
+    /* the file cache survives between process runs, so wipe any leftover entry from a prior run —
+       otherwise the very first call here would be served from that stale cache and never fetch */
+    const store = require(path.join(__dirname, "..", "ingest-store.js"));
+    { const all = await store.readAll(); delete all.__cache; await store.writeAll(all); }
+
+    process.env.TWITTERAPI_KEY = "test-key-123";
+    const handler = load();
+    const call = () => new Promise(r => handler(
+      { method: "POST", body: { channels: [{ id: "x1", platform: "x", url: "https://x.com/" + H }], hours: 24 } },
+      { setHeader() {}, status() { return this; }, json: p => r(p.results[0]) }));
+
+    const res1 = await call();
+    check(res1.ok === true && res1.posts.length === 2,
+      "only real posts come through — a retweet and an @reply are dropped",
+      (res1.posts || []).map(p => p.externalId).join(","));
+    check(sentKey === "test-key-123", "the key travels as the X-API-Key header", String(sentKey));
+    check(calls.some(u => u.includes("api.twitterapi.io")) && !calls.some(u => u === "https://x.com/" + H),
+      "it asked the API, never the blocked profile page", `calls=${calls.length}`);
+    check((res1.posts[0] || {}).externalId === "5001", "newest first — the report relies on it",
+      (res1.posts || []).map(p => p.externalId).join(","));
+    check(res1.source === "x-api", "the run says it read via the API", String(res1.source));
+    const vid = (res1.posts || []).find(p => p.externalId === "5004");
+    check(vid && vid.kind === "video", "a tweet's media type maps to kind", vid && vid.kind);
+    check(vid && /Ronaldo/.test(vid.text), "the words come through for the language check", vid && vid.text.slice(0, 30));
+
+    const before = calls.length;
+    const res2 = await call();
+    check(res2.ok === true && /cached/.test(res2.note || "") && calls.length === before,
+      "a second run inside the window is served from cache — no extra paid call",
+      `note="${res2.note}" newCalls=${calls.length - before}`);
+
+    delete process.env.TWITTERAPI_KEY;
+    global.fetch = realFetch;
+    try { const all = await store.readAll(); delete all.__cache; delete all[H]; await store.writeAll(all); } catch (e) {}
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

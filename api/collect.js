@@ -316,9 +316,54 @@ function xParsePost(rawArticle, handle) {
   };
 }
 
+/* twitterapi.io returns the timeline as JSON (data.tweets[]). Map it to the same post shape the
+   microdata parser produces. Retweets and replies are skipped — a retweet is someone else's post
+   on this account's page, and counting it would make a day of them read as delivered. */
+function xParseApi(jsonText, handle) {
+  let j; try { j = JSON.parse(jsonText); } catch (e) { return []; }
+  const tweets = j && j.data && Array.isArray(j.data.tweets) ? j.data.tweets : [];
+  return tweets.map(t => {
+    const id = String(t.id || t.id_str || "").trim();
+    const ms = new Date(t.createdAt || t.created_at || 0).getTime();
+    const text = String(t.text || "");
+    if (!id || !isFinite(ms) || /^RT @/.test(text) || /^@/.test(text)) return null;
+    const media = (t.extendedEntities && t.extendedEntities.media) || t.media || [];
+    const mtype = Array.isArray(media) && media[0] ? media[0].type : "";
+    return {
+      externalId: id,
+      ts: new Date(ms).toISOString(),
+      kind: mtype === "video" || mtype === "animated_gif" ? "video" : mtype === "photo" ? "photo" : "text",
+      text,
+      views: num(t.viewCount), likes: num(t.likeCount), comments: num(t.replyCount), reposts: num(t.retweetCount),
+      thumb: (Array.isArray(media) && media[0] && (media[0].media_url_https || media[0].media_url)) || "",
+      permalink: t.url || t.twitterUrl || ("https://x.com/" + handle + "/status/" + id),
+    };
+  }).filter(Boolean);
+}
+
 async function collectX(ch) {
   const handle = xTarget(ch);
   if (!handle) throw new Error("No X (Twitter) handle could be read from this channel");
+
+  /* Preferred path: a dedicated X API (twitterapi.io). X blocks datacenter IPs outright, so a
+     serverless host cannot read the page itself — this API reads it reliably and returns JSON.
+     Cached ~10 minutes, so several "Run daily check" clicks in a row cost ONE paid call, not one
+     each. Only used when TWITTERAPI_KEY is set; otherwise the free direct/proxy path below runs. */
+  if (process.env.TWITTERAPI_KEY) {
+    const cacheName = "x:" + handle.toLowerCase();
+    try {
+      const cached = await ingest.cacheGet(cacheName, 10 * 60e3);
+      if (cached && cached.length) return { posts: cached, source: "x-api", note: "read via twitterapi.io (cached ~10 min to save credits)" };
+    } catch (e) { /* cache miss is fine */ }
+    const r = await get("https://api.twitterapi.io/twitter/user/last_tweets?userName=" + encodeURIComponent(handle),
+      { "X-API-Key": process.env.TWITTERAPI_KEY });
+    if (r.status !== 200) throw new Error("twitterapi.io returned HTTP " + r.status + " for @" + handle);
+    const apiPosts = xParseApi(r.body, handle).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (!apiPosts.length) throw new Error("twitterapi.io returned no posts for @" + handle + " — treat as unknown, not empty.");
+    try { await ingest.cacheSet(cacheName, apiPosts); } catch (e) { /* caching is best-effort */ }
+    return { posts: apiPosts, source: "x-api", note: "read server-side via twitterapi.io" };
+  }
+
   const target = "https://x.com/" + encodeURIComponent(handle);
   const parse = body => xArticles(body).map(a => xParsePost(a, handle)).filter(Boolean);
 
@@ -351,7 +396,7 @@ async function collectX(ch) {
       throw new Error("X would not serve that profile (HTTP " + firstStatus + ").");
     }
     throw new Error("X did not render any posts for this profile — treat this as unknown, not empty." +
-      (process.env.X_SCRAPER ? "" : " (X blocks datacenter IPs; set the X_SCRAPER env var to read it server-side.)"));
+      (process.env.X_SCRAPER ? "" : " (X blocks datacenter IPs; set TWITTERAPI_KEY to read it server-side — or X_SCRAPER as a fallback.)"));
   }
 
   return {
@@ -568,7 +613,7 @@ async function collectOne(ch, cutoff) {
     const posts = out.posts
       .filter(p => !cutoff || new Date(p.ts).getTime() >= cutoff)
       .sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    return { ...base, ok: true, source, posts, note: out.note || "",
+    return { ...base, ok: true, source: out.source || source, posts, note: out.note || "",
              resolved: out.resolved || null, meta: out.meta || null };
   } catch (err) {
     return {
