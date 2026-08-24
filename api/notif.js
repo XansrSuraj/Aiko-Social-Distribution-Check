@@ -22,28 +22,13 @@
  */
 const crypto = require("crypto");
 const store = require("../ingest-store.js");
+const viber = require("../viber-ingest.js");
 
 const KEY = process.env.INGEST_KEY || "";
-
-/* name shown in the notification -> the channel id it belongs to. Match is case-insensitive and
-   substring, because Viber titles a community post variously ("Sportsfc.vn", "Sportsfc.vn: Admin",
-   or the name with a trailing count) and all of those are the same community. */
-const COMMUNITIES = (process.env.VIBER_COMMUNITIES ||
-  "Sportsfc.vn=viber:sportsfc.vn,Sportsfc.fans=viber:sportsfc.fans")
-  .split(",").map(s => s.trim()).filter(Boolean)
-  .map(pair => {
-    const i = pair.indexOf("=");
-    return { name: pair.slice(0, i).trim().toLowerCase(), channelId: pair.slice(i + 1).trim() };
-  }).filter(c => c.name && c.channelId);
 
 /* Viber's own app, by the name a forwarder reports or its package id. Anything else is ignored —
    this endpoint is for Viber community posts, not the phone's whole notification shade. */
 const IS_VIBER = s => /viber/i.test(String(s || ""));
-
-/* A bundle notification ("3 new messages", "Bạn có tin nhắn mới") carries no post — it is Viber
-   collapsing several. Filing it as one post would both undercount and store junk, so it is skipped
-   and the reply says so. The busy-day gap is what the dashboard's manual ✓ is there to close. */
-const BUNDLE = /^\s*(\d+\s+new\s+messages?|new\s+message|you\s+have|tin nhắn mới|\d+\s+tin nhắn)/i;
 
 function safeEqual(a, b) {
   const x = Buffer.from(String(a)), y = Buffer.from(String(b));
@@ -55,17 +40,9 @@ function fromLocalhost(req) {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
 }
 /* Auth is checked inside the handler, after parsing, so the key can arrive in the header, a ?key=
-   query param, or the JSON body (see there). fromLocalhost + safeEqual are the primitives it uses. */
-
-/* {postedAt} may arrive as epoch millis, epoch seconds, or an ISO string — accept all, and fall
-   back to now only when it is genuinely absent (a notification with no time is still a real post). */
-function toIso(v) {
-  if (v === undefined || v === null || v === "") return new Date().toISOString();
-  if (/^\d{13}$/.test(String(v))) return new Date(Number(v)).toISOString();
-  if (/^\d{10}$/.test(String(v))) return new Date(Number(v) * 1000).toISOString();
-  const t = new Date(v).getTime();
-  return isFinite(t) ? new Date(t).toISOString() : new Date().toISOString();
-}
+   query param, or the JSON body (see there). fromLocalhost + safeEqual are the primitives it uses.
+   Community routing, de-duplication and the raw live-log all live in ../viber-ingest.js, shared
+   with api/viber-webhook.js so both doors into the store behave identically. */
 
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -137,60 +114,10 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, ignored: "not a Viber notification", app: String(app) });
   }
 
-  /* From here it IS a Viber notification. Whatever happens to it — stored, ignored, a bundle, a
-     duplicate — it is recorded RAW in the live log (with its outcome) so the dashboard can show
-     exactly what the phone forwarded, in real time. */
+  /* From here it IS a Viber notification. The shared core routes it to a community, de-dupes it,
+     stores it, and records it RAW in the live log with its outcome — so the dashboard shows exactly
+     what the phone forwarded, in real time. Identical to the bot-webhook path. */
   const rawPostedAt = String(pick("postedAt", "when", "date", "message_date", "time", "timestamp") || "");
-  const ts = toIso(rawPostedAt);
-  const hay = (title + " " + text).toLowerCase();
-  const hit = COMMUNITIES.find(c => hay.includes(c.name));
-
-  /* The id decides what counts as "the same post". Viber posts one notification and then UPDATES it
-     when the sender name resolves, so the same video arrives twice — "Unknown: Video message" and
-     "Sportsfc.vn: Video message", a minute apart. Strip the "<sender>:" prefix (the only part that
-     differs) so both collapse; a 6-minute proximity check then absorbs a re-notify that drifted. */
-  const reEsc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const stripSender = t => !hit ? String(t || "").trim()
-    : String(t || "").replace(new RegExp("^\\s*(unknown|" + reEsc(hit.name) + ")\\s*:\\s*", "i"), "").trim();
-
-  let outcome, response;
-  if (!hit) {
-    outcome = "ignored — not a watched community";
-    response = { ok: true, ignored: "no watched community matched", title, watching: COMMUNITIES.map(c => c.name) };
-  } else if (!text || BUNDLE.test(text)) {
-    outcome = "skipped — bundle / no caption";
-    response = { ok: true, ignored: "bundle or empty — no single post to file", channelId: hit.channelId, text };
-  } else {
-    const idText = stripSender(text) || text;
-    const bucket = Math.floor(new Date(ts).getTime() / (3 * 60e3));
-    const externalId = "notif-" + crypto.createHash("sha1")
-      .update(hit.channelId + "|" + bucket + "|" + idText).digest("hex").slice(0, 16);
-    try {
-      const DEDUP_MS = 6 * 60e3;
-      const existing = await store.getPosts(hit.channelId);
-      const already = existing.some(p =>
-        stripSender(p.text) === idText && Math.abs(new Date(p.ts).getTime() - new Date(ts).getTime()) <= DEDUP_MS);
-      if (already) {
-        outcome = "duplicate — already have this one";
-        response = { ok: true, channelId: hit.channelId, added: 0, total: existing.length, deduped: "same post already within 6 min" };
-      } else {
-        const out = await store.addPosts(hit.channelId, [{ externalId, ts, text, kind: "post" }]);
-        outcome = "stored";
-        response = { ok: true, channelId: hit.channelId, ...out };
-      }
-    } catch (err) {
-      outcome = "error";
-      response = { ok: false, error: String((err && err.message) || err) };
-    }
-  }
-
-  /* record the raw notification + outcome for the live log (also stamps the heartbeat) */
-  try {
-    await store.logNotif({
-      at: new Date().toISOString(), title, text, postedAt: rawPostedAt, ts,
-      community: hit ? hit.channelId : "", outcome,
-    });
-  } catch (e) { await beat(); }
-
+  const { response } = await viber.record({ title, text, rawPostedAt, source: "phone" });
   return res.status(response.ok === false ? 500 : 200).json(response);
 };
