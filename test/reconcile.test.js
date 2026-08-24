@@ -158,6 +158,39 @@ rep = run(c => {
 ok(rep.expected === 3 && row(rep, "ytv").status === "short",
   "a hand-entered count is evidence and does set the target", `expected=${rep.expected}`);
 
+/* ── one post, two readers ──────────────────────────────────────────────────
+   The bug that shipped: the server API and the extension both read Instagram, keyed the same reel
+   by a numeric id and by its shortcode, and mergePosts (de-duping by id) kept both. The channel
+   counted 4 for a day it posted 2 — inflating the expected target so every OTHER channel read as
+   "2 missing" on a day nothing was missing. The count must survive the same post arriving twice. */
+console.log("\n── the same post from two readers counts once");
+const dup = (id, mins, text) => ({ externalId: id, ts: ago(mins), kind: "reel", text, permalink: "" });
+rep = run(c => {
+  c.posts = { ytv: [
+    dup("111", 60,  "Osasuna sẽ tận dụng lợi thế sân nhà tối nay"),
+    dup("ABC", 60,  "Osasuna sẽ tận dụng lợi thế sân nhà tối nay"),   // same content, extension's id
+    dup("222", 300, "GOAT vẫn chưa có hồi kết cuộc tranh luận"),
+    dup("DEF", 300, "GOAT vẫn chưa có hồi kết cuộc tranh luận"),
+  ] };
+});
+ok(row(rep, "ytv").count === 2, "four rows, two pieces of content → count 2", `count=${row(rep, "ytv").count}`);
+ok(!rep.alerts.some(a => a.kind === "over"), "and no false over-count alert");
+
+/* it must collapse only true duplicates — same words at the same minute — never distinct posts */
+rep = run(c => {
+  c.posts = { ytv: [
+    dup("a", 60, "Match preview: who takes tonight's derby"),
+    dup("b", 60, "Totally separate announcement about ticket sales"),
+  ] };
+});
+ok(row(rep, "ytv").count === 2, "two different captions in the same minute are NOT merged", `count=${row(rep, "ytv").count}`);
+
+/* and when there is too little text to be sure, ids are trusted rather than merged blindly */
+rep = run(c => {
+  c.posts = { ytv: [dup("a", 60, "🔥⚽️"), dup("b", 60, "🔥⚽️")] };
+});
+ok(row(rep, "ytv").count === 2, "two emoji-only posts keep their own ids, not merged on empty text", `count=${row(rep, "ytv").count}`);
+
 console.log("\n── alerts");
 
 rep = run(c => {

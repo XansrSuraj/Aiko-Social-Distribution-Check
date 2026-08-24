@@ -1116,6 +1116,31 @@ const fmtGap = m => m >= 1440 ? Math.round(m / 1440) + "d"
   : m >= 60 ? Math.floor(m / 60) + "h" + (m % 60 ? " " + (m % 60) + "m" : "")
   : m + "m";
 
+/* ── one post per piece of content ───────────────────────────────────────────
+   Two readers can hand the same post back under different ids. Instagram is the case that bit us:
+   the server API keys a reel by its numeric id (permalink /p/CODE), the extension by its shortcode
+   (permalink /reel/CODE) — same reel, two ids, so mergePosts (which de-dupes by id) kept both. A
+   channel then counted 4 for a day it posted 2, which inflated the expected target and made every
+   OTHER channel read as "2 missing" on a day nothing was actually missing.
+
+   So collapse a channel's posts to one per piece of content before counting. A substantial caption
+   at the same minute is the same content whichever reader found it — that is the signature used.
+   When there is too little text to be sure, the post's own id is kept as the key instead, so two
+   genuinely distinct short posts are never merged into one. */
+function contentKey(p){
+  const min = p && p.ts ? new Date(p.ts).toISOString().slice(0, 16) : "";
+  const txt = String((p && p.text) || "")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase().slice(0, 50);
+  if(txt.length >= 12) return "c:" + min + "|" + txt;      // same words, same minute → same content
+  return "i:" + ((p && p.externalId) || min);              // too little text — trust the id, don't merge
+}
+function dedupePosts(list){
+  const seen = new Map();
+  for(const p of (list || [])) { const k = contentKey(p); if(!seen.has(k)) seen.set(k, p); }
+  return [...seen.values()];
+}
+
 /* ── slots ─────────────────────────────────────────────────────────────────
    The same reel lands on each channel a minute or two apart, while separate drops are hours
    apart, so a new slot starts wherever the gap to the previous post exceeds the window.
@@ -1343,10 +1368,11 @@ function reconcile(channels, opt){
   const hours = Math.max(1, Math.round((to - from) / 3600e3));
   const inWindow = ts => { const t = new Date(ts).getTime(); return t >= from && t <= to + 60e3; };
 
-  /* posts inside the window, per channel */
+  /* posts inside the window, per channel — de-duped so the same content found by two readers under
+     two ids counts once (see contentKey), which is what keeps the expected target honest */
   const posts = {};
   for(const c of channels)
-    posts[c.id] = (checks.posts[c.id] || []).filter(p => p.ts && inWindow(p.ts));
+    posts[c.id] = dedupePosts((checks.posts[c.id] || []).filter(p => p.ts && inWindow(p.ts)));
 
   /* Count-only data is filed per content date. Pull in any date the window touches — a 24 h
      window straddles two of them for all but one instant of the day. */
@@ -1872,14 +1898,18 @@ async function runEverything(o){
   /* anything the popup left behind still counts */
   absorbBrowserRun();
 
-  /* Facebook and Instagram always need the extension. X only falls back to it when the server could
-     not read it — X serves its profile microdata to a home IP but can refuse a datacenter one, so a
-     Vercel deployment may fail server-side while the browser, on the user's own IP, still gets it.
-     A server X success (meta.ok) is left alone, so a healthy run never opens X twice. */
-  const xFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
+  /* Every readable platform now has a server-side reader: YouTube and Telegram directly, and X,
+     Facebook and Instagram through their APIs (twitterapi.io / Apify). The extension is a FALLBACK
+     ONLY — asked for a channel solely when the server could not read it (an API key not set, an
+     outage, an IP block). A server success (meta.ok) is left alone, so a healthy run never opens a
+     browser tab and, crucially, never layers a second, differently-keyed copy of the same posts on
+     top of the clean server ones (the extension keys Instagram reels by shortcode where the API
+     keys them by numeric id — running both is exactly what double-counted a channel and invented a
+     day of "missing" posts). */
+  const srvFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
   const browserChans = dcChannels(o)
-    .filter(c => c.platform === "facebook" || c.platform === "instagram"
-              || (c.platform === "x" && xFailed(c.id)))
+    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x")
+              && srvFailed(c.id))
     .map(c => ({ id:c.id, platform:c.platform, url:c.url,
                  handle:(c.handle || "").replace(/^@/, "").trim(),
                  username:(c.handle || "").replace(/^@/, "").trim() || chanLabelFromUrl(c.url) }));
