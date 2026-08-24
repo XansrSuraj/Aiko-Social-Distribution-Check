@@ -129,6 +129,15 @@ function sinceDate(days) {
   return new Date(Date.now() - days * 86400e3).toISOString().slice(0, 10);
 }
 
+/* Last resort when a live Apify call fails or times out (its actors cold-start and can occasionally
+   run past the function's ceiling): the last good read from the past few hours. That is still the
+   same day's content, so a transient slow run shows the real posts rather than blanking the channel
+   to "unknown" and inventing a gap. Self-heals the moment a fresh call succeeds again. */
+async function staleApify(cacheName) {
+  try { const c = await ingest.cacheGet(cacheName, 6 * 3600e3); return c && c.length ? c : null; }
+  catch (e) { return null; }
+}
+
 /* ═══════════════════ handle extraction ═══════════════════ */
 /* The directory stores a URL and a free-text handle. Either may be the usable one, so try the
    URL path first (it is the field the app validates) and fall back to the typed handle. */
@@ -524,9 +533,16 @@ async function collectInstagram(ch) {
       const c = await ingest.cacheGet(cacheName, 15 * 60e3);
       if (c && c.length) return { posts: c, source: "instagram-apify", note: "read via Apify (cached ~15 min to save credits)" };
     } catch (e) { /* cache miss is fine */ }
-    const items = await apifyItems("apify~instagram-post-scraper", {
-      username: [name], resultsLimit: 25, skipPinnedPosts: true, onlyPostsNewerThan: sinceDate(12),
-    });
+    let items;
+    try {
+      items = await apifyItems("apify~instagram-post-scraper", {
+        username: [name], resultsLimit: 25, skipPinnedPosts: true, onlyPostsNewerThan: sinceDate(12),
+      });
+    } catch (err) {
+      const stale = await staleApify(cacheName);
+      if (stale) return { posts: stale, source: "instagram-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
+      throw err;
+    }
     const posts = items.map(it => {
       const ms = new Date(it.timestamp || 0).getTime();
       const id = String(it.id || it.shortCode || "").trim();
@@ -626,9 +642,16 @@ async function collectFacebook(ch) {
     if (c && c.length) return { posts: c, source: "facebook-apify", note: "read via Apify (cached ~15 min to save credits)" };
   } catch (e) { /* cache miss is fine */ }
 
-  const items = await apifyItems("apify~facebook-posts-scraper", {
-    startUrls: [{ url: pageUrl }], resultsLimit: 25, onlyPostsNewerThan: sinceDate(12),
-  });
+  let items;
+  try {
+    items = await apifyItems("apify~facebook-posts-scraper", {
+      startUrls: [{ url: pageUrl }], resultsLimit: 25, onlyPostsNewerThan: sinceDate(12),
+    });
+  } catch (err) {
+    const stale = await staleApify(cacheName);
+    if (stale) return { posts: stale, source: "facebook-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
+    throw err;
+  }
   const posts = items.map(it => {
     const ms = fbWhen(it);
     const id = String(it.postId || it.facebookId || it.url || "").trim();

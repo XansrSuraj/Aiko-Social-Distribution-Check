@@ -416,8 +416,9 @@ ok(cr.expected === 2, "content matches never raise the target", `expected=${cr.e
   c.posts = {
     ytv: [P("a", 60, VN_A), P("b", 300, VN_B)],
     yte: [P("c", 61, EN_A), P("d", 301, EN_B)],
-    /* one Facebook post, matching only the later drop — the earlier one is simply unseen */
-    fbv: [P("f", 62, "")],
+    /* one Facebook post carrying a real timestamp but genuinely no caption (built directly, since
+       the P() helper substitutes a default caption for an empty one) */
+    fbv: [{ externalId: "f", ts: ago(62), kind: "video", text: "" }],
   };
   const rep = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
   const r = rep.rows.find(x => x.id === "fbv");
@@ -429,6 +430,32 @@ ok(cr.expected === 2, "content matches never raise the target", `expected=${cr.e
   ok(r.cells.every(x => x.state === "none"),
     "its cells stay blank rather than showing a cross",
     r.cells.map(x => x.state).join(","));
+})();
+
+/* The server-side reader (Apify) returns whole Facebook posts — timestamp AND caption — into
+   checks.posts, with nothing in checks.captions. Those captions must feed the content match exactly
+   as the extension's did, so Facebook reports itself from the server read alone, no extension. */
+(() => {
+  const c = M.checks();
+  Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+  c.counts = {}; c.meta = {}; c.captions = {};
+  c.posts = {
+    ytv: [P("a", 60, VN_A), P("b", 300, VN_B)],
+    yte: [P("c", 61, EN_A), P("d", 301, EN_B)],
+    /* both drops, as real posts (the shape Apify hands back), no checks.captions entry at all */
+    fbv: [{ externalId: "s1", ts: ago(60), kind: "video", text: clip(VN_A, 60), permalink: "https://fb/p/1", thumb: "https://fb/b1.jpg" },
+          { externalId: "s2", ts: ago(300), kind: "video", text: clip(VN_B, 55), permalink: "https://fb/p/2" }],
+  };
+  const rep = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  const r = rep.rows.find(x => x.id === "fbv");
+  ok(r.mode === "content" && r.count === 2,
+    "Facebook read server-side matches both drops from its posts' own captions", `${r.mode} ${r.count}/2`);
+  ok(r.cells.every(x => x.state === "okc"),
+    "and they show as content matches", r.cells.map(x => x.state).join(","));
+  ok(!rep.alerts.some(a => a.id === "fbv"), "nothing reported missing for it");
+  const cell = r.cells.find(x => x.post && x.post.permalink === "https://fb/p/1");
+  ok(cell && cell.post.thumb === "https://fb/b1.jpg",
+    "the matched cell carries the post's banner and link through", JSON.stringify(cell && cell.post.permalink));
 })();
 
 /* ── X as a timeline channel ────────────────────────────────────────────────

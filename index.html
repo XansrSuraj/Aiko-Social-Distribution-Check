@@ -1386,7 +1386,21 @@ function reconcile(channels, opt){
     return null;
   };
 
-  const bagOf = c => ((checks.captions || {})[c.id] || []).map(capObj);
+  /* The captions a content channel (Facebook) is matched on. The extension files them in
+     checks.captions. The server-side reader (Apify) instead returns whole posts — carrying the very
+     same captions — into checks.posts, so when no extension captions exist, the posts' own text IS
+     the caption bag. This is what lets Facebook match its drops from the server read alone, with no
+     extension involved, while staying on the content side (it still never anchors a drop or accuses
+     one of a miss — its unreliable coverage means silence still proves nothing). */
+  const bagOf = c => {
+    const caps = (checks.captions || {})[c.id] || [];
+    if(caps.length) return caps.map(capObj);
+    /* only posts that actually carry a caption become the bag — a timestamped but textless post is
+       not something to match on, and turning it into an empty caption would read as a failed match
+       (a false miss) rather than what it is: nothing to judge by, so the drop stays unknown */
+    return (posts[c.id] || []).filter(p => String(p.text || "").trim())
+      .map(p => capObj({ text:p.text, thumb:p.thumb, permalink:p.permalink }));
+  };
 
   /* ── channels only a person can answer for ──────────────────────────────
      Viber is the case. It has no public post list, no web client for the extension, and an
