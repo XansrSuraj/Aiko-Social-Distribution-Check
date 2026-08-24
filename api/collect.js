@@ -87,6 +87,48 @@ async function get(url, extraHeaders, alsoRetry) {
   }
 }
 
+/* ═══════════════════ Apify ═══════════════════ */
+/* Apify runs a scraper ("actor") on its own residential infrastructure and hands the result back
+   as a dataset. The run-sync-get-dataset-items route starts the run, waits for it, and returns the
+   items in a single call — which is why this has its own POST with a long leash rather than the
+   get() helper above (that one is GET-only and short-timeout). Scraping is slower than a plain
+   fetch, so the Vercel function is given matching room in vercel.json (maxDuration). Only ever
+   called when APIFY_TOKEN is set; the callers keep their own free path for when it is not. */
+const APIFY_TIMEOUT = 55000;
+async function apifyItems(actorPath, input) {
+  const url = "https://api.apify.com/v2/acts/" + actorPath +
+              "/run-sync-get-dataset-items?token=" + encodeURIComponent(process.env.APIFY_TOKEN) +
+              "&timeout=" + Math.floor(APIFY_TIMEOUT / 1000);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), APIFY_TIMEOUT);
+  let r;
+  try {
+    r = await fetch(url, {
+      method: "POST", signal: ctl.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  } catch (e) {
+    const aborted = e && (e.name === "AbortError" || /abort/i.test(String(e)));
+    throw new Error(aborted
+      ? "Apify took too long to answer — treat this channel as unknown, not empty"
+      : "Could not reach Apify: " + (e.message || e));
+  } finally { clearTimeout(timer); }
+
+  const body = await r.text();
+  if (r.status === 401 || r.status === 403) throw new Error("Apify refused the token (HTTP " + r.status + ") — check APIFY_TOKEN");
+  if (r.status !== 200 && r.status !== 201) throw new Error("Apify returned HTTP " + r.status);
+  let items; try { items = JSON.parse(body); } catch (e) { throw new Error("Apify answered with something that was not JSON"); }
+  if (!Array.isArray(items)) items = (items && items.items) || [];
+  return items;
+}
+
+/* YYYY-MM-DD, `days` ago — bounds an Apify scrape to just the recent window, which keeps every run
+   fast and cheap (fewer results billed) rather than crawling a page's whole history. */
+function sinceDate(days) {
+  return new Date(Date.now() - days * 86400e3).toISOString().slice(0, 10);
+}
+
 /* ═══════════════════ handle extraction ═══════════════════ */
 /* The directory stores a URL and a free-text handle. Either may be the usable one, so try the
    URL path first (it is the field the app validates) and fall back to the typed handle. */
@@ -471,6 +513,43 @@ async function collectTelegram(ch) {
 async function collectInstagram(ch) {
   const name = igTarget(ch);
   if (!name) throw new Error("No Instagram username could be read from this channel");
+
+  /* Preferred when APIFY_TOKEN is set: Apify's Instagram scraper, which reads from a residential
+     IP and does not depend on the fragile public web endpoint below (Instagram degrades or blocks
+     that one without warning). Cached ~15 min — repeated daily-check runs cost one paid call, not
+     one each. Pinned posts are skipped so an old pinned post never masquerades as today's. */
+  if (process.env.APIFY_TOKEN) {
+    const cacheName = "ig:" + name.toLowerCase();
+    try {
+      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+      if (c && c.length) return { posts: c, source: "instagram-apify", note: "read via Apify (cached ~15 min to save credits)" };
+    } catch (e) { /* cache miss is fine */ }
+    const items = await apifyItems("apify~instagram-post-scraper", {
+      username: [name], resultsLimit: 25, skipPinnedPosts: true, onlyPostsNewerThan: sinceDate(12),
+    });
+    const posts = items.map(it => {
+      const ms = new Date(it.timestamp || 0).getTime();
+      const id = String(it.id || it.shortCode || "").trim();
+      if (!id || !isFinite(ms)) return null;
+      /* a tagged / reshared post carries someone else's ownerUsername — not this channel's own */
+      if (it.ownerUsername && it.ownerUsername.toLowerCase() !== name.toLowerCase()) return null;
+      const t = String(it.type || "");
+      return {
+        externalId: id, ts: new Date(ms).toISOString(),
+        kind: t === "Sidecar" ? "carousel"
+            : t === "Video" ? (it.productType === "clips" ? "reel" : "video") : "image",
+        text: String(it.caption || ""),
+        permalink: it.url || (it.shortCode ? "https://www.instagram.com/p/" + it.shortCode + "/" : ""),
+        likes: num(it.likesCount), comments: num(it.commentsCount),
+        views: num(it.videoViewCount), duration: num(it.videoDuration),
+        thumb: it.displayUrl || "",
+      };
+    }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (!posts.length) throw new Error("Apify returned no Instagram posts for @" + name + " — treat this as unknown, not empty.");
+    try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
+    return { posts, source: "instagram-apify", note: "read server-side via Apify" };
+  }
+
   const r = await get(
     "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(name),
     { "X-IG-App-ID": IG_APP_ID, Accept: "application/json" }
@@ -512,6 +591,62 @@ async function collectInstagram(ch) {
     meta: { totalPosts: media.count, followers: (user.edge_followed_by || {}).count },
     note: "Public endpoint — returns about the last 12 posts",
   };
+}
+
+/* ═══════════════════ facebook (via Apify) ═══════════════════ */
+
+/* Facebook has no public post list a server can read, and it will not serve one to a datacenter
+   IP even if it did. The extension can drive a logged-in tab, but that ties the channel to a
+   browser being open. When APIFY_TOKEN is set, Apify's Facebook scraper reads the page's recent
+   posts server-side instead, so the channel reports on its own — no browser, no extension. */
+function fbTarget(ch) {
+  const u = String(ch.url || "").trim();
+  if (/facebook\.com/i.test(u)) return u.replace(/\/+$/, "");
+  const h = String(ch.handle || "").replace(/^@/, "").trim();
+  return h ? "https://www.facebook.com/" + h : "";
+}
+
+/* FB items carry an ISO `time` and usually a numeric `timestamp` too — prefer the ISO one, and if
+   only the number is there, read it as seconds or milliseconds by its magnitude. */
+function fbWhen(it) {
+  if (it.time && isFinite(new Date(it.time).getTime())) return new Date(it.time).getTime();
+  const n = Number(it.timestamp);
+  if (isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+  return NaN;
+}
+
+async function collectFacebook(ch) {
+  const pageUrl = fbTarget(ch);
+  if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
+  if (!process.env.APIFY_TOKEN) throw new Error("Facebook needs APIFY_TOKEN set to be read server-side");
+
+  const cacheName = "fb:" + pageUrl.toLowerCase();
+  try {
+    const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+    if (c && c.length) return { posts: c, source: "facebook-apify", note: "read via Apify (cached ~15 min to save credits)" };
+  } catch (e) { /* cache miss is fine */ }
+
+  const items = await apifyItems("apify~facebook-posts-scraper", {
+    startUrls: [{ url: pageUrl }], resultsLimit: 25, onlyPostsNewerThan: sinceDate(12),
+  });
+  const posts = items.map(it => {
+    const ms = fbWhen(it);
+    const id = String(it.postId || it.facebookId || it.url || "").trim();
+    if (!id || !isFinite(ms)) return null;
+    const media = Array.isArray(it.media) ? it.media : [];
+    const hasVideo = media.some(m => /video/i.test(String((m && (m.__typename || m.type)) || "")) || (m && m.videoUrl));
+    return {
+      externalId: id, ts: new Date(ms).toISOString(),
+      kind: hasVideo ? "video" : media.length > 1 ? "carousel" : media.length === 1 ? "photo" : (it.link ? "link" : "text"),
+      text: String(it.text || ""),
+      permalink: it.url || it.facebookUrl || "",
+      likes: num(it.likes), comments: num(it.comments), reposts: num(it.shares), views: num(it.viewsCount),
+      thumb: (media[0] && (media[0].thumbnail || (media[0].photo_image && media[0].photo_image.uri))) || "",
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  if (!posts.length) throw new Error("Apify returned no Facebook posts for this page — treat this as unknown, not empty.");
+  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
+  return { posts, source: "facebook-apify", note: "read server-side via Apify" };
 }
 
 /* ═══════════════════ viber (pushed in, not read out) ═══════════════════ */
@@ -596,18 +731,21 @@ async function collectOne(ch, cutoff) {
     return { ...base, source: "unsupported", unsupported: true, note: UNSUPPORTED[ch.platform] };
   }
 
+  /* Facebook is browser-only ONLY when there is no server-side reader for it. With APIFY_TOKEN set
+     it reads server-side (collectFacebook), so it falls through to the collector map instead. */
   const browserNote = BROWSER_ONLY[ch.platform];
-  if (browserNote) {
+  if (browserNote && !(ch.platform === "facebook" && process.env.APIFY_TOKEN)) {
     return { ...base, source: "browser-required", browserRequired: true, note: browserNote };
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
-                x: collectX, viber: collectViber };
+                x: collectX, facebook: collectFacebook, viber: collectViber };
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
   const source = { youtube: "youtube-rss", telegram: "telegram-web",
-                   instagram: "instagram-public", x: "x-web", viber: "ingest" }[ch.platform];
+                   instagram: "instagram-public", x: "x-web", facebook: "facebook-apify",
+                   viber: "ingest" }[ch.platform];
   try {
     const out = await fn(ch);
     const posts = out.posts

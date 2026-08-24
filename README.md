@@ -101,6 +101,7 @@ It is live at this point and already usable — but data is still per-browser un
    | `VIBER_COMMUNITIES` | optional | `Name=viber:handle` pairs, comma-separated (defaults to the two SportsFC communities) |
    | `TWITTERAPI_KEY` | recommended for X | the preferred way to read X server-side. A [twitterapi.io](https://twitterapi.io) key — X blocks datacenter IPs outright, so a deployment cannot read the page itself; this dedicated API can. Sent as the `X-API-Key` header. When set it is used first, and its answer is cached ~10 min so repeated checks cost one paid call, not one each. |
    | `X_SCRAPER` | optional fallback | only used when `TWITTERAPI_KEY` is not set — a scraping-proxy URL prefix (residential IP), e.g. `https://api.scraperapi.com/?api_key=KEY&url=`. The X profile URL is appended and fetched through it, used when a direct fetch comes back empty. |
+   | `APIFY_TOKEN` | recommended for Facebook + Instagram | an [Apify](https://apify.com) API token. When set, Instagram and Facebook are read server-side via Apify's scrapers (`apify/instagram-post-scraper`, `apify/facebook-posts-scraper`) instead of the fragile public IG endpoint and the browser extension. Answers are cached ~15 min, and runs are bounded to recent posts to stay fast and cheap. Without it, IG uses its public endpoint and FB stays extension-only. |
    | `ADMIN_PASSWORD` | optional | only if you want app-level gating on the report write on top of platform protection |
 
 5. **Deployments → ⋯ → Redeploy**
