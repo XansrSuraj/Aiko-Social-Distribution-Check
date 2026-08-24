@@ -1672,16 +1672,36 @@ async function collectServer(o){
 
   const chans = dcChannels(o);
   toast(`Collecting ${chans.length} channel(s)…`, "loader");
-  try{
-    const r = await fetch("api/collect", { method:"POST", headers:{ "Content-Type":"application/json" },
-      /* Always pull a little wider than the window on screen. The report can be widened to 7
-         days without re-collecting, and a post right on the boundary should not vanish because
-         the fetch stopped at exactly 24 h. */
-      body:JSON.stringify({ channels:chans, hours:192 }) });
-    const j = await r.json();
-    if(!j.ok) throw new Error(j.error || "collect failed");
 
-    let added = 0, ok = 0, browser = 0;
+  /* One request per SLOW channel, one shared request for the fast ones — never a single big batch.
+     Facebook and Instagram are read through Apify, whose scraper actors cold-start and can take
+     tens of seconds; bundled with the rest, four of them in one request would push the whole call
+     past the server's time limit and take the fast channels (YouTube, Telegram, X, Viber) down with
+     it — which is exactly why a healthy day once showed every server channel as "no data". Split
+     apart, each slow channel has its own time budget and a fast channel is never held hostage to it.
+     Always pull a little wider than the window on screen (192 h) so a post on the boundary survives. */
+  const SLOW = new Set(["facebook", "instagram"]);
+  const groups = [];
+  const fast = chans.filter(c => !SLOW.has(c.platform));
+  if(fast.length) groups.push(fast);
+  for(const c of chans.filter(c => SLOW.has(c.platform))) groups.push([c]);
+
+  const one = async batch => {
+    try{
+      const r = await fetch("api/collect", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({ channels:batch, hours:192 }) });
+      const j = await r.json();
+      if(!j.ok) throw new Error(j.error || "collect failed");
+      return j;
+    }catch(e){ return { ok:false, results:[], error:String(e.message || e), _batch:batch }; }
+  };
+
+  const parts = await Promise.all(groups.map(one));
+
+  let added = 0, ok = 0, browser = 0, unreached = 0, collectedAt = null;
+  for(const j of parts){
+    if((!j.results || !j.results.length) && j.error){ unreached += (j._batch || []).length; continue; }
+    collectedAt = j.collectedAt || collectedAt;
     for(const res of j.results){
       checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
         browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
@@ -1690,15 +1710,14 @@ async function collectServer(o){
       if(res.ok){ ok++; added += mergePosts(res.channelId, res.posts); }
       else if(res.browserRequired) browser++;
     }
-    checks.lastRun = j.collectedAt;
-    saveChecks();
-    toast(`${ok} channel(s) read, ${added} new post(s)` + (browser ? ` · ${browser} need the extension` : ""),
-          ok ? "check-check" : "triangle-alert");
-    return true;
-  }catch(e){
-    toast("Could not collect: " + (e.message || e), "triangle-alert");
-    return false;
   }
+  checks.lastRun = collectedAt || new Date().toISOString();
+  saveChecks();
+  toast(`${ok} channel(s) read, ${added} new post(s)`
+        + (browser ? ` · ${browser} need the extension` : "")
+        + (unreached ? ` · ${unreached} could not be reached (will use the extension / last read)` : ""),
+        ok ? "check-check" : "triangle-alert");
+  return ok > 0;
 }
 
 /* ── the browser half ────────────────────────────────────────────────────
