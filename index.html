@@ -734,41 +734,22 @@ function anim(t, from){
 }
 
 /* ═══════════════════ constants ═══════════════════ */
+/* Only the platforms this board actually watches. platform() below falls back gracefully for any
+   id not here, so adding a channel on a new platform still renders — add its row here for the real
+   colour and icon. */
 const DEF_PLATFORMS = [
-  { id:"facebook",  name:"Facebook",        color:"#1877f2", icon:"si:facebook" },
-  { id:"instagram", name:"Instagram",       color:"#e1306c", icon:"si:instagram" },
-  { id:"x",         name:"X (Twitter)",     color:"#16181c", icon:"si:x" },
-  { id:"linkedin",  name:"LinkedIn",        color:"#0a66c2", icon:"si:linkedin" },
-  { id:"youtube",   name:"YouTube",         color:"#ff0033", icon:"si:youtube" },
-  { id:"tiktok",    name:"TikTok",          color:"#00b8c4", icon:"si:tiktok" },
-  { id:"threads",   name:"Threads",         color:"#3d3d3d", icon:"si:threads" },
-  { id:"pinterest", name:"Pinterest",       color:"#bd081c", icon:"si:pinterest" },
-  { id:"whatsapp",  name:"WhatsApp",        color:"#25d366", icon:"si:whatsapp" },
-  { id:"telegram",  name:"Telegram",        color:"#229ed9", icon:"si:telegram" },
-  { id:"viber",     name:"Viber",           color:"#7360f2", icon:"si:viber" },
-  { id:"snapchat",  name:"Snapchat",        color:"#c9a800", icon:"si:snapchat" },
-  { id:"reddit",    name:"Reddit",          color:"#ff4500", icon:"si:reddit" },
-  { id:"discord",   name:"Discord",         color:"#5865f2", icon:"si:discord" },
-  { id:"spotify",   name:"Spotify",         color:"#1db954", icon:"si:spotify" },
-  { id:"gbp",       name:"Google Business", color:"#34a853", icon:"lucide:store" },
-  { id:"other",     name:"Other channel",  color:"#64748b", icon:"lucide:at-sign" },
+  { id:"youtube",   name:"YouTube",     color:"#ff0033", icon:"si:youtube" },
+  { id:"telegram",  name:"Telegram",    color:"#229ed9", icon:"si:telegram" },
+  { id:"x",         name:"X (Twitter)", color:"#16181c", icon:"si:x" },
+  { id:"facebook",  name:"Facebook",    color:"#1877f2", icon:"si:facebook" },
+  { id:"instagram", name:"Instagram",   color:"#e1306c", icon:"si:instagram" },
+  { id:"viber",     name:"Viber",       color:"#7360f2", icon:"si:viber" },
 ];
-const THEMES = [
-  { a1:"#5b6bff", a2:"#a855f7" }, { a1:"#0ea5e9", a2:"#22d3ee" }, { a1:"#10b981", a2:"#84cc16" },
-  { a1:"#f43f5e", a2:"#f97316" }, { a1:"#f59e0b", a2:"#eab308" }, { a1:"#8b5cf6", a2:"#ec4899" },
-  { a1:"#334155", a2:"#64748b" },
-];
-/* HKEY is versioned: results cached before per-platform verification existed carry no `verified`
-   field, and treating a missing field as verified would keep showing the old false green on
-   social links until the hour-long cache expired. It is only a cache, so start it fresh. */
-const LKEY = "orghub.v1", HKEY = "orghub.health.v2", HTTL = 3600e3;
+const LKEY = "orghub.v1";
 
 const blank = () => ({
-  settings:{ title:"Aiko", a1:"#5b6bff", a2:"#a855f7", theme:"dark", passHash:null,
-             platforms:DEF_PLATFORMS.map(p => ({ ...p })) },
-  orgs:[]
+  settings:{ a1:"#5b6bff", a2:"#a855f7", theme:"dark", platforms:DEF_PLATFORMS.map(p => ({ ...p })) },
 });
-const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-3);
 
 /* ═══════════════════ the channels this dashboard watches ═══════════════════
    Hardcoded on purpose. This is a single-team daily-check board, not a directory anyone edits from
@@ -796,48 +777,37 @@ const SPORTSFC = {
 
 /* ═══════════════════ state ═══════════════════ */
 let state = blank();
-let cloud = { mode:"local", configured:false, adminReady:false, updatedAt:null, saving:false, error:null };
-let unlocked = false, selected = null, query = "", booting = true;
-let health = {};                                        // url -> {ok,status,note,at}
-let checking = new Set();
+let cloud = { mode:"local", configured:false, updatedAt:null, saving:false, error:null };
+let booting = true;
 
+/* Settings are only theme + accent colours + the platform palette now (the channel list is
+   hardcoded, so there is nothing else to carry). Merge whatever was saved over the defaults, then
+   make sure every watched platform has an icon and is present. */
 function normalize(d){
   const b = blank();
-  const st = { settings:{ ...b.settings, ...((d && d.settings) || {}) },
-               orgs:(d && Array.isArray(d.orgs)) ? d.orgs : [] };
-  if(d && d.settings && d.settings.accent && !d.settings.a1){ st.settings.a1 = d.settings.accent; st.settings.a2 = d.settings.accent; }
-  /* one-time rename: saved settings from earlier versions still carry the old title */
-  if(["Org Hub", "Aiko Org Hub"].indexOf(st.settings.title) !== -1) st.settings.title = "Aiko";
+  const st = { settings:{ ...b.settings, ...((d && d.settings) || {}) } };
   st.settings.platforms = (st.settings.platforms || []).map(p => {
     const def = DEF_PLATFORMS.find(x => x.id === p.id);
     return { ...p, icon:p.icon || (def ? def.icon : "") };
   });
   if(!st.settings.platforms.length) st.settings.platforms = b.settings.platforms;
-  /* A platform added to DEF_PLATFORMS after someone already had settings saved would otherwise
-     never reach them — this only ever backfilled icons onto rows that were already there, so the
-     new entry existed in the code and nowhere in the app. Appended, never overwriting: a platform
-     the user renamed, recoloured or deliberately deleted keeps whatever they made of it. */
   const seen = new Set(st.settings.platforms.map(p => p.id));
-  const removed = new Set(st.settings.removedPlatforms || []);
-  for(const d of DEF_PLATFORMS)
-    if(!seen.has(d.id) && !removed.has(d.id)) st.settings.platforms.push({ ...d });
-  st.orgs.forEach(o => { o.websites = o.websites || []; o.socials = o.socials || []; o.tags = o.tags || []; });
+  for(const dp of DEF_PLATFORMS) if(!seen.has(dp.id)) st.settings.platforms.push({ ...dp });
   return st;
 }
 const readLocal  = () => { try{ return normalize(JSON.parse(localStorage.getItem(LKEY) || "null")); }catch(e){ return blank(); } };
 const writeLocal = () => { try{ localStorage.setItem(LKEY, JSON.stringify(state)); }catch(e){} };
 const adminKey   = () => sessionStorage.getItem("orghub.key") || "";
 
-try{ const h = JSON.parse(localStorage.getItem(HKEY) || "{}"); if(h && typeof h === "object") health = h; }catch(e){}
-const saveHealth = () => { try{ localStorage.setItem(HKEY, JSON.stringify(health)); }catch(e){} };
-
 /* ═══════════════════ cloud layer ═══════════════════ */
+/* The settings row is read-only from the dashboard now — there is no directory to edit, so nothing
+   writes it back. pull() only reports the storage mode (local vs shared) and brings the shared
+   settings (theme, accent) across. The shared daily-check REPORT has its own read/write below. */
 async function pull(){
   const r = await fetch("api/data", { cache:"no-store" });
   const j = await r.json();
   if(!j.ok) throw new Error(j.error || "read failed");
   cloud.configured = !!j.configured;
-  cloud.adminReady = !!j.adminReady;
   if(j.configured){
     cloud.mode = "cloud"; cloud.updatedAt = j.updatedAt || null;
     state = normalize(j.data);
@@ -846,57 +816,8 @@ async function pull(){
   }
 }
 
-/* GET /api/data is public, so the row must never carry the local password hash —
-   an exposed hash of a reused password is brute-forceable offline. In cloud mode the
-   password lives only in the ADMIN_PASSWORD env var, so the hash is dead weight anyway. */
-function cloudPayload(){
-  const copy = { ...state, settings:{ ...state.settings } };
-  delete copy.settings.passHash;
-  return copy;
-}
-
-async function persist(){
-  if(cloud.mode !== "cloud"){ writeLocal(); return true; }
-  cloud.saving = true; cloud.error = null; paintSync();
-  try{
-    const r = await fetch("api/data", {
-      method:"PUT",
-      headers:{ "Content-Type":"application/json", "x-admin-key":adminKey() },
-      body:JSON.stringify({ data:cloudPayload(), baseUpdatedAt:cloud.updatedAt })
-    });
-    const j = await r.json().catch(() => ({}));
-    if(r.status === 409){
-      cloud.saving = false; paintSync();
-      const go = await confirmBox("Changed on another device",
-        "Someone saved a newer version of this data. Reload to get the latest — your unsaved change here will be lost.", false);
-      if(go){ await pull(); render(); }
-      return false;
-    }
-    if(r.status === 401){
-      cloud.saving = false; setUnlocked(false);
-      toast("Session expired — sign in again", "lock"); return false;
-    }
-    if(!r.ok || !j.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
-    cloud.updatedAt = j.updatedAt || cloud.updatedAt;
-    cloud.saving = false; paintSync();
-    return true;
-  }catch(e){
-    cloud.saving = false; cloud.error = String(e.message || e); paintSync();
-    toast("Could not save: " + cloud.error, "triangle-alert");
-    return false;
-  }
-}
-/* every mutation goes through this */
-async function commit(msg, ic){
-  const ok = await persist();
-  render();
-  if(ok && msg) toast(msg, ic || "check");
-  return ok;
-}
-
 /* ═══════════════════ helpers ═══════════════════ */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
-const org = id => state.orgs.find(o => o.id === id);
 
 function safeUrl(u){
   const s = String(u || "").trim();
@@ -905,7 +826,6 @@ function safeUrl(u){
   if(/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
   return "https://" + s.replace(/^\/+/, "");
 }
-function hostOf(u){ try{ return new URL(safeUrl(u)).hostname; }catch(e){ return ""; } }
 function pretty(u){
   try{ const x = new URL(safeUrl(u)); return (x.host.replace(/^www\./, "") + x.pathname).replace(/\/$/, ""); }
   catch(e){ return String(u || ""); }
@@ -976,16 +896,8 @@ function closeModal(){ veil.classList.remove("on"); mo.innerHTML = ""; onEsc = o
 veil.onclick = e => { if(e.target === veil && onVeil) onVeil(); };
 document.addEventListener("keydown", e => {
   if(e.key === "Escape" && onEsc) return onEsc();
-  if(e.key === "/" && !veil.classList.contains("on") && !/input|textarea|select/i.test(document.activeElement.tagName)){
-    e.preventDefault(); const q = document.getElementById("q"); if(q) q.focus();
-  }
 });
 const X = `<button class="b g i" data-close data-fb="X"><i data-lucide="x"></i></button>`;
-function showErr(m){
-  let el = mo.querySelector(".err");
-  if(!el){ el = document.createElement("div"); el.className = "err"; mo.querySelector(".mb").appendChild(el); }
-  el.textContent = m; el.classList.add("on"); anim(el, { y:-4, opacity:0, duration:.22 });
-}
 function confirmBox(title, body, danger){
   danger = danger !== false;
   return new Promise(res => {
@@ -998,14 +910,6 @@ function confirmBox(title, body, danger){
     mo.querySelector("#y").onclick = () => { closeModal(); res(true); };
     onEsc = onVeil = () => { closeModal(); res(false); };
   });
-}
-
-/* ═══════════════════ admin ═══════════════════ */
-function setUnlocked(v){
-  unlocked = v;
-  if(!v) sessionStorage.removeItem("orghub.key");
-  sessionStorage.setItem("orghub.unlocked", v ? "1" : "0");
-  render();
 }
 
 /* ═══════════════════ daily check ═══════════════════

@@ -129,11 +129,12 @@ function sinceDate(days) {
   return new Date(Date.now() - days * 86400e3).toISOString().slice(0, 10);
 }
 
-/* Last resort when a live Apify call fails or times out (its actors cold-start and can occasionally
-   run past the function's ceiling): the last good read from the past few hours. That is still the
-   same day's content, so a transient slow run shows the real posts rather than blanking the channel
-   to "unknown" and inventing a gap. Self-heals the moment a fresh call succeeds again. */
-async function staleApify(cacheName) {
+/* Last resort when a live read fails or times out (a paid API blips, an Apify actor cold-starts and
+   runs past the function ceiling): the last good read from the past few hours. That is still the
+   same day's content, so a transient failure shows the real posts rather than blanking the channel
+   to "unknown" and inventing a gap. Self-heals the moment a fresh call succeeds again. Used by X,
+   Instagram and Facebook — every channel read through a cached third-party API. */
+async function staleRead(cacheName) {
   try { const c = await ingest.cacheGet(cacheName, 6 * 3600e3); return c && c.length ? c : null; }
   catch (e) { return null; }
 }
@@ -406,9 +407,20 @@ async function collectX(ch) {
       const cached = await ingest.cacheGet(cacheName, 10 * 60e3);
       if (cached && cached.length) return { posts: cached, source: "x-api", note: "read via twitterapi.io (cached ~10 min to save credits)" };
     } catch (e) { /* cache miss is fine */ }
-    const r = await get("https://api.twitterapi.io/twitter/user/last_tweets?userName=" + encodeURIComponent(handle),
-      { "X-API-Key": process.env.TWITTERAPI_KEY });
-    if (r.status !== 200) throw new Error("twitterapi.io returned HTTP " + r.status + " for @" + handle);
+    let r;
+    try {
+      r = await get("https://api.twitterapi.io/twitter/user/last_tweets?userName=" + encodeURIComponent(handle),
+        { "X-API-Key": process.env.TWITTERAPI_KEY });
+    } catch (err) {
+      const stale = await staleRead(cacheName);
+      if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io was unreachable — showing the last good read (" + (err.message || err) + ")" };
+      throw err;
+    }
+    if (r.status !== 200) {
+      const stale = await staleRead(cacheName);
+      if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io returned HTTP " + r.status + " — showing the last good read" };
+      throw new Error("twitterapi.io returned HTTP " + r.status + " for @" + handle);
+    }
     const apiPosts = xParseApi(r.body, handle).sort((a, b) => new Date(b.ts) - new Date(a.ts));
     if (!apiPosts.length) throw new Error("twitterapi.io returned no posts for @" + handle + " — treat as unknown, not empty.");
     try { await ingest.cacheSet(cacheName, apiPosts); } catch (e) { /* caching is best-effort */ }
@@ -539,7 +551,7 @@ async function collectInstagram(ch) {
         username: [name], resultsLimit: 25, skipPinnedPosts: true, onlyPostsNewerThan: sinceDate(12),
       });
     } catch (err) {
-      const stale = await staleApify(cacheName);
+      const stale = await staleRead(cacheName);
       if (stale) return { posts: stale, source: "instagram-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
       throw err;
     }
@@ -648,7 +660,7 @@ async function collectFacebook(ch) {
       startUrls: [{ url: pageUrl }], resultsLimit: 25, onlyPostsNewerThan: sinceDate(12),
     });
   } catch (err) {
-    const stale = await staleApify(cacheName);
+    const stale = await staleRead(cacheName);
     if (stale) return { posts: stale, source: "facebook-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
     throw err;
   }
