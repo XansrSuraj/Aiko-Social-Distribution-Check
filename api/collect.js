@@ -319,24 +319,45 @@ function xParsePost(rawArticle, handle) {
 async function collectX(ch) {
   const handle = xTarget(ch);
   if (!handle) throw new Error("No X (Twitter) handle could be read from this channel");
-  const r = await get("https://x.com/" + encodeURIComponent(handle));
-  if (r.status !== 200) throw new Error("X would not serve that profile (HTTP " + r.status + ").");
+  const target = "https://x.com/" + encodeURIComponent(handle);
+  const parse = body => xArticles(body).map(a => xParsePost(a, handle)).filter(Boolean);
 
-  const posts = xArticles(r.body).map(a => xParsePost(a, handle)).filter(Boolean);
+  /* 1) Try X directly. Its logged-out profile page carries the posts as schema.org microdata, which
+        the parser reads. This works from most IPs. */
+  let posts = [], via = "direct", firstStatus = 0;
+  try {
+    const r = await get(target);
+    firstStatus = r.status;
+    if (r.status === 200) posts = parse(r.body);
+  } catch (e) { /* fall through to the proxy, if any */ }
 
-  /* A logged-out render of a real, healthy profile carries at least one fully-formed article —
-     the account this was built and measured against returns all three of its posts at three posts
-     total. Zero here is indistinguishable from a dead handle, a suspended account or X declining
-     to render this particular request, and none of those is "posted nothing" — so this is
-     reported as a refusal, exactly like an unreadable Telegram preview, never as an empty answer. */
+  /* 2) X deliberately refuses datacenter IPs (like a serverless host): it answers 200 but with an
+        empty client-side shell — no microdata, so zero posts. When that happens and a scraping proxy
+        is configured (X_SCRAPER = a URL prefix that fetches from a residential IP), fetch the SAME
+        page through it and parse that. Only used on a miss, so it never spends a credit needlessly. */
+  if (!posts.length && process.env.X_SCRAPER) {
+    try {
+      const r2 = await get(process.env.X_SCRAPER + encodeURIComponent(target));
+      if (r2.status === 200) { const p2 = parse(r2.body); if (p2.length) { posts = p2; via = "residential proxy"; } }
+    } catch (e) { /* keep the empty direct result */ }
+  }
+
+  /* Zero posts is indistinguishable from a dead handle, a suspended account, or X declining this
+     request — none of those is "posted nothing" — so report it as a refusal (unknown), never empty.
+     A non-200 is a different refusal (rate-limit, 404) and is named as such; a 200-with-no-posts is
+     the datacenter-IP block, which the X_SCRAPER proxy is there to get past. */
   if (!posts.length) {
-    throw new Error("X did not render any posts for this profile — treat this as unknown, not empty.");
+    if (firstStatus && firstStatus !== 200) {
+      throw new Error("X would not serve that profile (HTTP " + firstStatus + ").");
+    }
+    throw new Error("X did not render any posts for this profile — treat this as unknown, not empty." +
+      (process.env.X_SCRAPER ? "" : " (X blocks datacenter IPs; set the X_SCRAPER env var to read it server-side.)"));
   }
 
   return {
     posts,
     note: "Profile page shows only the most recent handful of posts (as few as 3, rarely more " +
-          "than about 10) with no way to page further back",
+          "than about 10)" + (via === "residential proxy" ? " · read via residential proxy (X blocked the server's own IP)" : ""),
   };
 }
 

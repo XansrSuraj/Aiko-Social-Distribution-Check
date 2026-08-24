@@ -99,6 +99,7 @@ It is live at this point and already usable — but data is still per-browser un
    | `SUPABASE_SERVICE_KEY` | for a shared report | the `service_role` key |
    | `INGEST_KEY` | if Viber / any push is used | a long random string; sent as `x-ingest-key` |
    | `VIBER_COMMUNITIES` | optional | `Name=viber:handle` pairs, comma-separated (defaults to the two SportsFC communities) |
+   | `X_SCRAPER` | optional | to read X server-side when it blocks the deployment's IP — a scraping-proxy URL prefix (residential IP), e.g. `https://api.scraperapi.com/?api_key=KEY&url=`. The X profile URL is appended and fetched through it. Only used when a direct fetch comes back empty. |
    | `ADMIN_PASSWORD` | optional | only if you want app-level gating on the report write on top of platform protection |
 
 5. **Deployments → ⋯ → Redeploy**

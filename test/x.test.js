@@ -210,6 +210,29 @@ const VN2 = "🐐 Tuổi tác chỉ là một con số với Cristiano Ronaldo. 
     check(got === want, `handle from url="${url}" handle="${handleField}"`, `asked for "${got}"`);
   }
 
+  console.log("\n── X_SCRAPER proxy gets past a datacenter-IP block");
+  {
+    const good = page(article("3100", 15, "read through the proxy"));
+    const calls = [];
+    global.fetch = async (url) => {
+      calls.push(String(url));
+      /* x.com direct = the empty shell X serves a blocked server; the proxy URL = the real page */
+      if (String(url).includes("scraper.test")) return { status: 200, text: async () => good };
+      return { status: 200, text: async () => "<html>empty shell, no microdata</html>" };
+    };
+    process.env.X_SCRAPER = "https://scraper.test/?url=";
+    const handler = load();
+    const res = await new Promise(r => handler(
+      { method: "POST", body: { channels: [{ id: "x1", platform: "x", url: "https://x.com/" + HANDLE }], hours: 24 } },
+      { setHeader() {}, status() { return this; }, json: p => r(p.results[0]) }));
+    delete process.env.X_SCRAPER;
+    global.fetch = realFetch;
+    check(res.ok === true && res.posts.length === 1,
+      "blocked direct → the proxy is used and the post comes through", JSON.stringify({ ok: res.ok, n: (res.posts || []).length }));
+    check(/residential proxy/.test(res.note || ""), "and the note says it read via the proxy", res.note);
+    check(calls.some(u => u.includes("scraper.test")), "the proxy URL was actually fetched", `calls=${calls.length}`);
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
