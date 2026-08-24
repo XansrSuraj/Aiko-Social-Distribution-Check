@@ -188,6 +188,13 @@ function xTarget(ch) {
   return (String(ch.handle || "").match(/@?([\w]{1,15})/) || [])[1] || "";
 }
 
+/* a Telegram BOT is t.me/<BotName> — the same first path segment (or the handle), @ stripped */
+function tgBotTarget(ch) {
+  const p = pathOf(ch.url).replace(/^s\//, "");
+  return (p.match(/^@?([A-Za-z0-9_]{3,})/) || [])[1] ||
+         (String(ch.handle || "").match(/@?([A-Za-z0-9_]{3,})/) || [])[1] || "";
+}
+
 /* ═══════════════════ youtube ═══════════════════ */
 
 /* A handle (@SportsFC-vn) is not accepted by the feed endpoint — only the UC… id is. The id is
@@ -739,6 +746,64 @@ async function collectTiktok(ch) {
   return { posts, source: "tiktok-apify", note: "read server-side via Apify" };
 }
 
+/* ═══════════════════ telegram bot (1:1 DMs, via a user session) ═══════════════════ */
+
+/* A Telegram BOT sends reels 1:1 — private DMs with no public page to scrape (unlike a channel's
+   t.me/s/ preview). The only way to read them is to BE the account they were sent to. So this reads
+   the bot's chat through a Telegram USER session (MTProto/GramJS): the account that started the bot
+   fetches its own recent incoming messages. GramJS is required lazily — only this collector needs
+   it, so the rest of the app (and the tests) load with no dependency. Env: TG_API_ID, TG_API_HASH,
+   TG_SESSION (a StringSession made once by tg-login.js). Cached, with the same stale-read fallback. */
+async function collectTgBot(ch) {
+  const target = tgBotTarget(ch);
+  if (!target) throw new Error("No Telegram bot name could be read from this channel");
+  if (!process.env.TG_SESSION || !process.env.TG_API_ID || !process.env.TG_API_HASH)
+    throw new Error("Telegram bot needs TG_API_ID / TG_API_HASH / TG_SESSION set (run tg-login.js once)");
+
+  const cacheName = "tgbot:" + target.toLowerCase();
+  try {
+    const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+    if (c && c.length) return { posts: c, source: "telegram-mtproto", note: "read via Telegram user-session (cached ~15 min)" };
+  } catch (e) { /* cache miss is fine */ }
+
+  let messages;
+  try {
+    const { TelegramClient } = require("telegram");
+    const { StringSession } = require("telegram/sessions");
+    const client = new TelegramClient(new StringSession(process.env.TG_SESSION),
+      Number(process.env.TG_API_ID), process.env.TG_API_HASH, { connectionRetries: 2, baseLogger: { info(){}, warn(){}, error(){}, debug(){} } });
+    await client.connect();
+    try {
+      const entity = await client.getEntity(target);
+      messages = await client.getMessages(entity, { limit: 30 });
+    } finally { await client.disconnect().catch(() => {}); }
+  } catch (err) {
+    const stale = await staleRead(cacheName);
+    if (stale) return { posts: stale, source: "telegram-mtproto", note: "Telegram read failed — showing the last good read (" + (err.message || err) + ")" };
+    throw err;
+  }
+
+  const posts = (messages || []).map(m => {
+    if (!m || m.out) return null;                 // skip our own outgoing (/start etc.), keep the bot's
+    const ms = m.date ? m.date * 1000 : 0;
+    const id = m.id != null ? String(m.id) : "";
+    if (!id || !ms) return null;
+    const text = String(m.message || m.text || "");
+    const hasMedia = !!m.media;
+    if (!text && !hasMedia) return null;          // pure service message — not a post
+    return {
+      externalId: "tg-" + id, ts: new Date(ms).toISOString(),
+      kind: hasMedia ? "video" : "post",
+      text: text || "[media]",
+      permalink: "https://t.me/" + target,
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  if (!posts.length) throw new Error("No messages read from @" + target + " — treat this as unknown, not empty.");
+  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* best-effort */ }
+  return { posts, source: "telegram-mtproto", note: "read server-side via a Telegram user-session" };
+}
+
 /* ═══════════════════ viber (pushed in, not read out) ═══════════════════ */
 
 /* Viber is the one channel here that cannot be read at all: its invite page carries no posts, it
@@ -782,6 +847,7 @@ function handleAlias(ch) {
             : ch.platform === "telegram" ? tgTarget(ch)
             : ch.platform === "instagram" ? igTarget(ch)
             : ch.platform === "tiktok" ? ttTarget(ch)
+            : ch.platform === "tgbot" ? tgBotTarget(ch)
             : (pathOf(ch.url).split("/")[0] || String(ch.handle || "").replace(/^@/, ""));
   const handle = String(raw || "").trim().toLowerCase();
   return handle ? ch.platform + ":" + handle : "";
@@ -830,13 +896,14 @@ async function collectOne(ch, cutoff) {
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
-                x: collectX, facebook: collectFacebook, tiktok: collectTiktok, viber: collectViber };
+                x: collectX, facebook: collectFacebook, tiktok: collectTiktok, tgbot: collectTgBot,
+                viber: collectViber };
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
   const source = { youtube: "youtube-rss", telegram: "telegram-web",
                    instagram: "instagram-public", x: "x-web", facebook: "facebook-apify",
-                   tiktok: "tiktok-apify", viber: "ingest" }[ch.platform];
+                   tiktok: "tiktok-apify", tgbot: "telegram-mtproto", viber: "ingest" }[ch.platform];
   try {
     const out = await fn(ch);
     const posts = out.posts
