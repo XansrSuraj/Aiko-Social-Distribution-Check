@@ -28,7 +28,8 @@ function runApify(channel, itemsByActor, opts) {
   global.fetch = async (url, init) => {
     const u = String(url);
     calls.push({ url: u, body: init && init.body ? JSON.parse(init.body) : null });
-    const which = /instagram-post-scraper/.test(u) ? "ig" : /facebook-posts-scraper/.test(u) ? "fb" : null;
+    const which = /instagram-post-scraper/.test(u) ? "ig" : /facebook-posts-scraper/.test(u) ? "fb"
+                : /tiktok-scraper/.test(u) ? "tt" : null;
     if (which) return { status: 201, text: async () => JSON.stringify(itemsByActor[which] || []) };
     return { status: 200, text: async () => "<html>a platform page — must not be used when a token is set</html>" };
   };
@@ -95,6 +96,27 @@ function runApify(channel, itemsByActor, opts) {
     check(isFinite(t2) && Math.abs(Date.now() - t2 - 200 * 60e3) < 5 * 60e3, "a seconds-only timestamp is read correctly");
     check(calls[0].url.includes("facebook-posts-scraper") && calls[0].body.startUrls[0].url.includes("facebook.com/Sportsfcvn"),
       "the page URL is passed to the FB actor");
+  }
+
+  console.log("\n── TikTok via Apify");
+  {
+    const items = [
+      { id: "tt1", createTimeISO: ago(40), text: "Bàn thắng đẹp nhất tuần 🔥", webVideoUrl: "https://www.tiktok.com/@sportsfc.fans/video/tt1",
+        playCount: 12000, diggCount: 800, commentCount: 30, shareCount: 45, authorMeta: { name: "sportsfc.fans" }, videoMeta: { duration: 18, coverUrl: "https://tt/c.jpg" } },
+      { id: "tt2", createTimeISO: ago(310), text: "another clip", webVideoUrl: "https://www.tiktok.com/@sportsfc.fans/video/tt2", authorMeta: { name: "sportsfc.fans" } },
+      { id: "tt3", createTimeISO: ago(90), text: "not ours", authorMeta: { name: "someone_else" } },   // reshare — must drop
+    ];
+    const ch = { id: "tt", platform: "tiktok", url: "https://www.tiktok.com/@sportsfc.fans" };
+    const { res, calls } = await runApify(ch, { tt: items });
+    check(res.ok === true && res.posts.length === 2, "only this profile's own videos come through — a reshare is dropped",
+      (res.posts || []).map(p => p.externalId).join(","));
+    check(res.source === "tiktok-apify", "the run says it read via Apify", String(res.source));
+    check(res.posts[0].externalId === "tt1" && res.posts[0].kind === "video", "newest first, kind video", res.posts[0].kind);
+    check(res.posts[0].views === 12000 && res.posts[0].likes === 800 && res.posts[0].reposts === 45,
+      "counts land in the shared fields", `views=${res.posts[0].views} likes=${res.posts[0].likes} shares=${res.posts[0].reposts}`);
+    check(/Bàn|thắng/.test(res.posts[0].text), "the caption comes through for the language check", res.posts[0].text.slice(0, 24));
+    check(calls[0].url.includes("tiktok-scraper") && calls[0].body.profiles[0] === "sportsfc.fans",
+      "the profile is passed to the TikTok actor");
   }
 
   console.log("\n── the ~15-minute cache spares a second paid call");

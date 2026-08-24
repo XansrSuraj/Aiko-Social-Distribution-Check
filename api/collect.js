@@ -172,6 +172,14 @@ function igTarget(ch) {
   return name;
 }
 
+/* TikTok URLs are tiktok.com/@handle, so the leading @ is stripped off the path (or the handle). */
+function ttTarget(ch) {
+  const p = pathOf(ch.url);
+  const name = (p.match(/^@?([A-Za-z0-9._]+)/) || [])[1] ||
+               (String(ch.handle || "").match(/@?([A-Za-z0-9._]+)/) || [])[1] || "";
+  return name;
+}
+
 /* the path segments x.com/twitter.com use for something other than a handle */
 const X_RESERVED = /^(i|status|statuses|intent|search|home|hashtag|explore|notifications|messages|settings|compose|login|signup)$/i;
 function xTarget(ch) {
@@ -684,6 +692,53 @@ async function collectFacebook(ch) {
   return { posts, source: "facebook-apify", note: "read server-side via Apify" };
 }
 
+/* ═══════════════════ tiktok (via Apify) ═══════════════════ */
+
+/* TikTok blocks server requests and has no free public feed, but Apify's scraper reads a profile's
+   recent videos server-side — same shape as the Facebook/Instagram readers, same APIFY_TOKEN, same
+   cache-then-stale fallback. A reshare carries someone else's authorMeta, so it is dropped. */
+async function collectTiktok(ch) {
+  const name = ttTarget(ch);
+  if (!name) throw new Error("No TikTok username could be read from this channel");
+  if (!process.env.APIFY_TOKEN) throw new Error("TikTok needs APIFY_TOKEN set to be read server-side");
+
+  const cacheName = "tt:" + name.toLowerCase();
+  try {
+    const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+    if (c && c.length) return { posts: c, source: "tiktok-apify", note: "read via Apify (cached ~15 min to save credits)" };
+  } catch (e) { /* cache miss is fine */ }
+
+  let items;
+  try {
+    items = await apifyItems("clockworks~tiktok-scraper", {
+      profiles: [name], resultsPerPage: 25, profileScrapeSections: ["videos"],
+      profileSorting: "latest", excludePinnedPosts: true, oldestPostDateUnified: sinceDate(12),
+    });
+  } catch (err) {
+    const stale = await staleRead(cacheName);
+    if (stale) return { posts: stale, source: "tiktok-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
+    throw err;
+  }
+  const posts = items.map(it => {
+    const ms = new Date(it.createTimeISO || (it.createTime ? it.createTime * 1000 : 0)).getTime();
+    const id = String(it.id || "").trim();
+    if (!id || !isFinite(ms)) return null;
+    const owner = String((it.authorMeta && (it.authorMeta.name || it.authorMeta.uniqueId)) || "").toLowerCase();
+    if (owner && owner !== name.toLowerCase()) return null;   // a reshare of someone else's video
+    return {
+      externalId: id, ts: new Date(ms).toISOString(), kind: "video",
+      text: String(it.text || ""),
+      permalink: it.webVideoUrl || ("https://www.tiktok.com/@" + name + "/video/" + id),
+      views: num(it.playCount), likes: num(it.diggCount), comments: num(it.commentCount), reposts: num(it.shareCount),
+      duration: num(it.videoMeta && it.videoMeta.duration),
+      thumb: (it.videoMeta && (it.videoMeta.coverUrl || it.videoMeta.cover || it.videoMeta.originalCoverUrl)) || "",
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  if (!posts.length) throw new Error("Apify returned no TikTok posts for @" + name + " — treat this as unknown, not empty.");
+  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
+  return { posts, source: "tiktok-apify", note: "read server-side via Apify" };
+}
+
 /* ═══════════════════ viber (pushed in, not read out) ═══════════════════ */
 
 /* Viber is the one channel here that cannot be read at all: its invite page carries no posts, it
@@ -716,9 +771,9 @@ async function collectViber(ch) {
 const BROWSER_ONLY = {
   facebook: "Facebook has no public post list any more — collect this one with the browser extension",
 };
-const UNSUPPORTED = {
-  tiktok: "TikTok cannot be collected — it refuses server requests and the extension does not cover it",
-};
+/* Nothing is outright unsupported any more — TikTok now reads server-side via Apify (collectTiktok)
+   when APIFY_TOKEN is set, and reports "unknown" honestly when it is not. Kept for future platforms. */
+const UNSUPPORTED = {};
 
 /* platform:handle, lowercased — the same first-path-segment handle every collector above already
    extracts, so a pusher only ever needs to know the public name on the URL, never an internal id */
@@ -726,6 +781,7 @@ function handleAlias(ch) {
   const raw = ch.platform === "x" ? xTarget(ch)
             : ch.platform === "telegram" ? tgTarget(ch)
             : ch.platform === "instagram" ? igTarget(ch)
+            : ch.platform === "tiktok" ? ttTarget(ch)
             : (pathOf(ch.url).split("/")[0] || String(ch.handle || "").replace(/^@/, ""));
   const handle = String(raw || "").trim().toLowerCase();
   return handle ? ch.platform + ":" + handle : "";
@@ -774,13 +830,13 @@ async function collectOne(ch, cutoff) {
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
-                x: collectX, facebook: collectFacebook, viber: collectViber };
+                x: collectX, facebook: collectFacebook, tiktok: collectTiktok, viber: collectViber };
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
   const source = { youtube: "youtube-rss", telegram: "telegram-web",
                    instagram: "instagram-public", x: "x-web", facebook: "facebook-apify",
-                   viber: "ingest" }[ch.platform];
+                   tiktok: "tiktok-apify", viber: "ingest" }[ch.platform];
   try {
     const out = await fn(ch);
     const posts = out.posts

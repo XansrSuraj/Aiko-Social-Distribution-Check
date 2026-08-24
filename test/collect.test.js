@@ -7,11 +7,11 @@
  *
  *   node test/collect.test.js
  *
- * Facebook is expected to come back browser-required and TikTok unsupported — those are the
- * correct answers, not failures, and they have to stay distinct: pointing someone at the
- * extension for TikTok would send them to a tool that never reports it. Instagram is allowed to
- * fail outright, since its public endpoint is rate-limited per IP and is treated as a bonus
- * everywhere in this feature, never a dependency.
+ * YouTube, Telegram and X are the real guards here — hard-checked, because a fixture would hide a
+ * feed/markup change until it mattered. Facebook, Instagram and TikTok read server-side through
+ * Apify when APIFY_TOKEN is set and degrade gracefully without it (browser-required / a clear
+ * note), so they are reported informationally rather than hard-failed — their outcome legitimately
+ * depends on the env and the network, not on the parsers this test exists to watch.
  */
 const path = require("path");
 const collect = require(path.join(__dirname, "..", "api", "collect.js"));
@@ -39,8 +39,7 @@ const CHANNELS = [
 ];
 
 const MUST_COLLECT = ["yt-vn", "yt-fans", "tg-vn", "tg-fans", "x-vn"];
-const MUST_NEED_BROWSER = ["fb-vn"];
-const MUST_BE_UNSUPPORTED = ["tt-fans"];
+const APIFY_CHANNELS = ["fb-vn", "ig-vn", "tt-fans"];   // server-side when APIFY_TOKEN is set
 
 const iso = s => !isNaN(new Date(s).getTime());
 
@@ -133,21 +132,17 @@ collect({ method: "POST", body: { channels: CHANNELS, days: 6 } }, {
       }
     }
 
-    for (const id of MUST_NEED_BROWSER) {
+    /* Facebook, Instagram and TikTok read server-side through Apify when APIFY_TOKEN is set, and
+       without it degrade gracefully (browser-required / a clear note) — never a crash, never
+       "unsupported". Env-dependent, so reported, not hard-failed. */
+    for (const id of APIFY_CHANNELS) {
       const r = by(id);
-      check(r.browserRequired === true && r.ok === false, `${id} reported as browser-required`);
-      check(!r.unsupported, `${id} is not marked unsupported — the extension does collect it`);
-      check(!!r.note, `${id} explains why`, r.note);
-    }
-
-    /* unsupported and browser-required must not blur together: one says "use the other tool",
-       the other says "there is no tool", and sending someone to the extension for TikTok wastes
-       their time on something that will never report it */
-    for (const id of MUST_BE_UNSUPPORTED) {
-      const r = by(id);
-      check(r.unsupported === true && r.ok === false, `${id} reported as unsupported`);
-      check(!r.browserRequired, `${id} does not claim the extension can collect it`);
-      check(/cannot be collected/i.test(r.note || ""), `${id} says so plainly`, r.note);
+      const state = r.ok ? `${(r.posts || []).length} posts via ${r.source}`
+                  : r.browserRequired ? "browser-required (no APIFY_TOKEN)"
+                  : `not read: ${r.note || "?"}`;
+      console.log(`  info  ${id} — ${state}`);
+      check(r.ok === true || !!r.note, `${id} responds gracefully (collected, or a clear note)`, r.note);
+      check(!r.unsupported, `${id} is never marked unsupported — it has a server-side reader now`);
     }
 
     /* Viber is pushed in, never read out — so an empty store means nobody has pushed yet, which

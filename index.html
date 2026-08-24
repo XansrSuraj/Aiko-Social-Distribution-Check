@@ -743,6 +743,7 @@ const DEF_PLATFORMS = [
   { id:"x",         name:"X (Twitter)", color:"#16181c", icon:"si:x" },
   { id:"facebook",  name:"Facebook",    color:"#1877f2", icon:"si:facebook" },
   { id:"instagram", name:"Instagram",   color:"#e1306c", icon:"si:instagram" },
+  { id:"tiktok",    name:"TikTok",      color:"#00b8c4", icon:"si:tiktok" },
   { id:"viber",     name:"Viber",       color:"#7360f2", icon:"si:viber" },
 ];
 const LKEY = "orghub.v1";
@@ -769,6 +770,7 @@ const SPORTSFC = {
     { id:"fb-fans", platform:"facebook",  url:"https://facebook.com/Sportsfc.fans", handle:"Sportsfc.fans",  note:"english" },
     { id:"ig-vn",   platform:"instagram", url:"https://instagram.com/sportsfc.vn",  handle:"sportsfc.vn",    note:"vietnamese" },
     { id:"ig-fans", platform:"instagram", url:"https://instagram.com/sportsfc.fans",handle:"sportsfc.fans",  note:"english" },
+    { id:"tt-vn",   platform:"tiktok",    url:"https://www.tiktok.com/@sportsfc.fans", handle:"sportsfc.fans", note:"vietnamese" },
     { id:"vb-vn",   platform:"viber",     url:"https://invite.viber.com/?g2=AQBb1E9bG9aYOFaoK6NCZWomB5NyKXRWW9B%2B88qnMHECatqiPo6UvpuEjWAoMEHN", handle:"Sportsfc.vn",   note:"vietnamese" },
     { id:"vb-fans", platform:"viber",     url:"https://invite.viber.com/?g2=AQBYisJhU5NX0laoK25C7uTANpWbuOE7yZ5xBjKrXwcjgcUIZdgXex9Sc%2Bi0Twir",       handle:"Sportsfc.fans", note:"english" },
   ],
@@ -1680,7 +1682,7 @@ async function collectServer(o){
      it — which is exactly why a healthy day once showed every server channel as "no data". Split
      apart, each slow channel has its own time budget and a fast channel is never held hostage to it.
      Always pull a little wider than the window on screen (192 h) so a post on the boundary survives. */
-  const SLOW = new Set(["facebook", "instagram"]);
+  const SLOW = new Set(["facebook", "instagram", "tiktok"]);
   const groups = [];
   const fast = chans.filter(c => !SLOW.has(c.platform));
   if(fast.length) groups.push(fast);
