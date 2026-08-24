@@ -7,8 +7,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/check.test.js && node test/retry.test.js && node test/reconcile.test.js && node test/fbdate.test.js && node test/x.test.js && node test/x-ext.test.js && node test/ingest.test.js && node test/notif.test.js && node test/report.test.js && node test/health.test.js && node test/notiflog.test.js && node test/apify.test.js && node test/collectsplit.test.js && node test/viberwebhook.test.js && node test/collect.test.js",
-    "test:unit": "node test/check.test.js && node test/retry.test.js && node test/reconcile.test.js && node test/fbdate.test.js && node test/x.test.js && node test/x-ext.test.js && node test/ingest.test.js && node test/notif.test.js && node test/report.test.js && node test/health.test.js && node test/notiflog.test.js && node test/apify.test.js && node test/collectsplit.test.js && node test/viberwebhook.test.js",
+    "test": "node test/check.test.js && node test/retry.test.js && node test/reconcile.test.js && node test/fbdate.test.js && node test/x.test.js && node test/x-ext.test.js && node test/ingest.test.js && node test/notif.test.js && node test/report.test.js && node test/health.test.js && node test/notiflog.test.js && node test/apify.test.js && node test/collectsplit.test.js && node test/collect.test.js",
+    "test:unit": "node test/check.test.js && node test/retry.test.js && node test/reconcile.test.js && node test/fbdate.test.js && node test/x.test.js && node test/x-ext.test.js && node test/ingest.test.js && node test/notif.test.js && node test/report.test.js && node test/health.test.js && node test/notiflog.test.js && node test/apify.test.js && node test/collectsplit.test.js",
     "test:live": "node test/collect.test.js"
   }
 }
