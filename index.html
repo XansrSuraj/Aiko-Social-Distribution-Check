@@ -1277,10 +1277,15 @@ function reconcile(channels, opt){
   const inWindow = ts => { const t = new Date(ts).getTime(); return t >= from && t <= to + 60e3; };
 
   /* posts inside the window, per channel — de-duped so the same content found by two readers under
-     two ids counts once (see contentKey), which is what keeps the expected target honest */
+     two ids counts once (see contentKey), which is what keeps the expected target honest.
+     If a channel's LATEST collect FAILED (meta.ok === false — an outage, a rate/credit limit, a
+     timeout), its previously-stored posts are IGNORED here. Otherwise the reconcile would measure
+     today against a stale snapshot and cross off every drop newer than it — inventing misses on a
+     channel we simply could not read. A channel we could not read must read "unknown", never "✗". */
+  const readFailed = c => { const m = (checks.meta || {})[c.id]; return !!(m && m.ok === false); };
   const posts = {};
   for(const c of channels)
-    posts[c.id] = dedupePosts((checks.posts[c.id] || []).filter(p => p.ts && inWindow(p.ts)));
+    posts[c.id] = readFailed(c) ? [] : dedupePosts((checks.posts[c.id] || []).filter(p => p.ts && inWindow(p.ts)));
 
   /* Count-only data is filed per content date. Pull in any date the window touches — a 24 h
      window straddles two of them for all but one instant of the day. */

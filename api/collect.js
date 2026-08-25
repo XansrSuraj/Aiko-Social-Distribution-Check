@@ -129,13 +129,15 @@ function sinceDate(days) {
   return new Date(Date.now() - days * 86400e3).toISOString().slice(0, 10);
 }
 
-/* Last resort when a live read fails or times out (a paid API blips, an Apify actor cold-starts and
-   runs past the function ceiling): the last good read from the past few hours. That is still the
-   same day's content, so a transient failure shows the real posts rather than blanking the channel
-   to "unknown" and inventing a gap. Self-heals the moment a fresh call succeeds again. Used by X,
-   Instagram and Facebook — every channel read through a cached third-party API. */
+/* Last resort for a BRIEF live-read blip (an actor cold-starts, a momentary 5xx): the last good
+   read, but only if it is genuinely recent. Kept deliberately short (20 min) — a stale read served
+   as if it were current is worse than admitting we could not read, because the report would mark
+   every drop NEWER than the stale data as "missing" when the posts actually went out. So beyond
+   this window we return null: the collector then fails honestly and the channel reads "could not
+   read / unknown", never a false cross. (This is exactly what a prolonged outage — e.g. Apify's
+   monthly free credits running out — must not turn into invented misses.) */
 async function staleRead(cacheName) {
-  try { const c = await ingest.cacheGet(cacheName, 6 * 3600e3); return c && c.length ? c : null; }
+  try { const c = await ingest.cacheGet(cacheName, 20 * 60e3); return c && c.length ? c : null; }
   catch (e) { return null; }
 }
 

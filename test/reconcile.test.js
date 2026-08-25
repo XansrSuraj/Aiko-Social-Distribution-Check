@@ -191,6 +191,24 @@ rep = run(c => {
 });
 ok(row(rep, "ytv").count === 2, "two emoji-only posts keep their own ids, not merged on empty text", `count=${row(rep, "ytv").count}`);
 
+/* ── a channel we could not read this run ────────────────────────────────────
+   The false-alarm that shipped: Apify's free credits ran out, so Facebook/Instagram/TikTok could
+   not be read; a stale snapshot (only the day's first post) was served as if current, and every
+   later drop was crossed off as "missing" — when the posts had actually gone out. A channel whose
+   latest collect FAILED (meta.ok === false) must have its stale posts ignored and read "unknown",
+   never a cross. */
+console.log("\n── a channel we could not read reads unknown, never a false miss");
+rep = run(c => {
+  c.posts = { ytv: [P("a", 60, VN_TEXT), P("b", 300, VN_TEXT)],   // two real drops, seen on ytv
+              tgv: [P("c", 61, VN_TEXT)] };                        // tgv has only a stale first post…
+  c.meta = { tgv: { ok: false, note: "Apify limit exceeded — could not read" } };  // …because its read FAILED
+});
+ok(row(rep, "tgv").status === "unknown", "a read-failed channel reads unknown, not short/missing", row(rep, "tgv").status);
+ok(!rep.alerts.some(a => a.kind === "missing" && a.id === "tgv"), "and raises no missing alert for it");
+ok(row(rep, "tgv").cells.every(x => x.state !== "miss"), "none of its cells is a cross",
+  row(rep, "tgv").cells.map(x => x.state).join(","));
+ok(rep.expected === 2, "the read-failed channel does not distort the expected count", `expected=${rep.expected}`);
+
 console.log("\n── alerts");
 
 rep = run(c => {
