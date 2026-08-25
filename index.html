@@ -1953,6 +1953,130 @@ const dur = s => s === null || s === undefined ? "—"
   : s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s";
 const clean = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
 
+/* ── downloadable report card ────────────────────────────────────────────────
+   A small, self-contained PNG of the day's check: every channel, each drop, what went out (a short
+   caption), and which channel is missing which — a card you can save or share after a run. Drawn as
+   pure SVG (no library) and rasterised through a canvas, so it works offline and taints nothing. */
+const CARD_COLOR = { ok:"#3fb950", okc:"#2dd4bf", okh:"#3fb950", asm:"#2dd4bf",
+                     maybe:"#e3b341", miss:"#f85149", lang:"#e3b341", none:"#6e7681" };
+function downloadReportCard(rep, o, wo){
+  try{
+    const tz = rep.tz, slots = rep.slots, rows = rep.rows;
+    const W = 860, P = 34, colW = 40, badgeW = 74;
+    const gx = W - P - badgeW - slots.length * colW;   // where the per-drop glyph columns begin
+    const centre = i => gx + i * colW + colW / 2;
+    const esT = (x, y, s, o2) => { o2 = o2 || {};
+      return `<text x="${x}" y="${y}" font-family="'Segoe UI',Roboto,Arial,sans-serif" ` +
+        `font-size="${o2.size || 15}" fill="${o2.fill || '#e6edf3'}" font-weight="${o2.weight || 400}" ` +
+        `text-anchor="${o2.anchor || 'start'}" opacity="${o2.op == null ? 1 : o2.op}">${esc(s)}</text>`; };
+    const trunc = (s, n) => { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+    const deliveredIn = i => rows.filter(r => ["ok","okc","okh","asm"].indexOf((r.cells[i]||{}).state) !== -1).length;
+    const snip = s => { const t = (s.posts || []).map(p => clean(p.text || "")).find(x => x && x.length > 3) || ""; return trunc(t, 84); };
+
+    const el = [];
+    let y = P + 8;
+
+    /* header */
+    el.push(esT(P, y + 20, o.name || "SportsFC", { size: 30, weight: 800 }));
+    const problems = rep.alerts.length;
+    const pillC = problems ? "#f85149" : "#3fb950", pillBg = problems ? "#3a1113" : "#0f2a17";
+    const pillTxt = problems ? problems + (problems === 1 ? " problem" : " problems") : "All clear";
+    const pillW = 26 + pillTxt.length * 8.4;
+    el.push(`<rect x="${W - P - pillW}" y="${y}" width="${pillW}" height="30" rx="15" fill="${pillBg}" stroke="${pillC}" stroke-opacity="0.5"/>`);
+    el.push(esT(W - P - pillW / 2, y + 20, pillTxt, { size: 14, weight: 700, fill: pillC, anchor: "middle" }));
+    y += 30;
+    const when = wo.mode === "day" ? (wo.date || "") + "  ·  " + hhmm(rep.from, tz) + "–" + hhmm(rep.to, tz)
+               : hhmm(rep.from, tz) + " → " + hhmm(rep.to, tz);
+    el.push(esT(P, y + 16, "Daily check  ·  " + when + "  ·  " + tzLabel(tz), { size: 13.5, fill: "#8b949e" }));
+    y += 34;
+    el.push(`<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="#21262d"/>`);
+    y += 24;
+
+    /* what went out — a short caption per drop */
+    if(slots.length){
+      el.push(esT(P, y + 12, "WHAT WENT OUT", { size: 12, weight: 700, fill: "#8b949e" }));
+      y += 26;
+      slots.forEach((s, i) => {
+        el.push(esT(P, y + 13, hhmm(s.at, tz), { size: 14, weight: 700, fill: "#58a6ff" }));
+        el.push(esT(P + 66, y + 13, deliveredIn(i) + "/" + rows.length, { size: 12.5, weight: 600, fill: "#8b949e" }));
+        el.push(esT(P + 120, y + 13, snip(s) || "—", { size: 13.5, fill: "#c9d1d9" }));
+        y += 24;
+      });
+      y += 8;
+      el.push(`<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="#21262d"/>`);
+      y += 22;
+    }
+
+    /* column headers: the drop times over each glyph column, + Total */
+    slots.forEach((s, i) => el.push(esT(centre(i), y + 10, hhmm(s.at, tz), { size: 11.5, weight: 600, fill: "#8b949e", anchor: "middle" })));
+    el.push(esT(W - P, y + 10, "TOTAL", { size: 11.5, weight: 600, fill: "#8b949e", anchor: "end" }));
+    y += 24;
+
+    /* channels, grouped by language */
+    const LGNAME = { vi: "Vietnamese", en: "English", th: "Thai", zh: "Chinese", "—": "Other" };
+    for(const lg of rep.langs){
+      const group = rows.filter(r => (r.lang || "—") === lg);
+      if(!group.length) continue;
+      el.push(esT(P, y + 12, (LGNAME[lg] || lg).toUpperCase() + "  ·  " + group.length, { size: 11.5, weight: 700, fill: "#6e7681" }));
+      y += 26;
+      for(const r of group){
+        el.push(esT(P, y + 14, trunc(r.name, 34), { size: 14.5, weight: 500 }));
+        r.cells.forEach((c, i) => {
+          const st = c.state || "none", col = CARD_COLOR[st] || "#6e7681", g = (CELL[st] || CELL.none).g;
+          el.push(esT(centre(i), y + 15, g, { size: 16, weight: 700, fill: col, anchor: "middle" }));
+        });
+        /* total badge */
+        let tot, tc;
+        if(r.mode === "timefold"){ tot = r.count + " ✓"; tc = "#2dd4bf"; }
+        else if(r.mode === "none"){ tot = "—"; tc = "#6e7681"; }
+        else if(r.expected == null){ tot = String(r.count); tc = "#8b949e"; }
+        else { tot = r.count + "/" + r.expected; tc = r.status === "ok" ? "#3fb950" : r.status === "short" ? "#f85149" : "#e3b341"; }
+        el.push(esT(W - P, y + 14, tot, { size: 13.5, weight: 700, fill: tc, anchor: "end" }));
+        y += 27;
+      }
+      y += 8;
+    }
+
+    /* legend + footer */
+    y += 6;
+    el.push(`<line x1="${P}" y1="${y}" x2="${W - P}" y2="${y}" stroke="#21262d"/>`);
+    y += 22;
+    el.push(esT(P, y + 8, "✓ posted    ≈ same content    ✗ missing    ⚠ wrong language    ? verify    · no data",
+      { size: 12, fill: "#8b949e" }));
+    y += 24;
+    el.push(esT(P, y + 8, "Generated " + new Date().toLocaleString(), { size: 11.5, fill: "#6e7681" }));
+    y += 26;
+
+    const H = y + P - 8;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+      `<rect width="${W}" height="${H}" rx="20" fill="#0d1117"/>` +
+      `<rect x="0" y="0" width="${W}" height="5" fill="url(#g)"/>` +
+      `<defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="${state.settings.a1 || '#5b6bff'}"/><stop offset="1" stop-color="${state.settings.a2 || '#a855f7'}"/></linearGradient></defs>` +
+      el.join("") + `</svg>`;
+
+    const scale = 2;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = W * scale; canvas.height = H * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(b => {
+        if(!b) return toast("Could not build the image", "triangle-alert");
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = "sportsfc-daily-" + (wo.date || contentDate(rep.to, tz)) + ".png";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        toast("Report card downloaded", "check-check");
+      }, "image/png");
+    };
+    img.onerror = () => toast("Could not render the card — try again", "triangle-alert");
+    img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
+  }catch(e){ toast("Download failed: " + (e.message || e), "triangle-alert"); }
+}
+
 function dailyCheckModal(o){
   const draw = () => {
     const chans = dcChannels(o);
@@ -2375,6 +2499,7 @@ function dailyCheckModal(o){
       </div>
       <div class="mf">
         <button class="b" data-close>Close</button>
+        <button class="b" id="dcDownload"><i data-lucide="download"></i> Download</button>
         <button class="b" id="dcCopy"><i data-lucide="copy"></i> Copy report</button>
         <button class="b d" id="dcClear"><i data-lucide="trash-2"></i> Delete report</button>
       </div>`, { wide:true, focus:null });
@@ -2443,6 +2568,8 @@ function dailyCheckModal(o){
         saveChecks(); draw();
       };
     });
+
+    mo.querySelector("#dcDownload").onclick = () => downloadReportCard(rep, o, wo);
 
     mo.querySelector("#dcCopy").onclick = () => {
       const L = [`${o.name} — daily check`,
