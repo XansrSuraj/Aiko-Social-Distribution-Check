@@ -116,6 +116,11 @@ async function apifyItems(actorPath, input) {
   } finally { clearTimeout(timer); }
 
   const body = await r.text();
+  /* Apify signals an exhausted monthly free quota with a 403 whose body says "usage hard limit" —
+     tell that apart from a genuinely bad token, since the fix is completely different (wait for the
+     cycle to reset / add credit vs. re-check the key). */
+  if (/usage hard limit|monthly usage|usage limit/i.test(body))
+    throw new Error("Apify monthly free credits are used up — Facebook/Instagram/TikTok can't be read until the cycle resets (or you add Apify credit)");
   if (r.status === 401 || r.status === 403) throw new Error("Apify refused the token (HTTP " + r.status + ") — check APIFY_TOKEN");
   if (r.status !== 200 && r.status !== 201) throw new Error("Apify returned HTTP " + r.status);
   let items; try { items = JSON.parse(body); } catch (e) { throw new Error("Apify answered with something that was not JSON"); }
