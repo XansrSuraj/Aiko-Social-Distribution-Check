@@ -1434,20 +1434,10 @@ function reconcile(channels, opt){
     const bag = bagOf(c);
 
     /* one cell per drop, so the matrix can be read straight across a row */
-    /* Viber verdict is by COUNT, not by matching each post to a drop. Time-alignment to the other
-       channels is unreliable for it — it is posted independently, the notification time drifts, and
-       the same post can arrive as two notifications ("Unknown" + the name). So collapse near-
-       simultaneous notifications into distinct posts, and compare that count to how many broadcasts
-       happened in this channel's language (its reliable timeline peers). */
-    let tfDelivered = 0, tfExpected = 0;
-    if(mode === "timefold"){
-      const times = (posts[c.id] || []).map(p => new Date(p.ts).getTime()).filter(t => isFinite(t)).sort((a, b) => a - b);
-      const distinct = [];
-      for(const t of times) if(!distinct.length || t - distinct[distinct.length - 1] > 3 * 60e3) distinct.push(t);
-      tfDelivered = distinct.length;
-      const peers = channels.filter(x => !foldsByTime(x) && !matchesByContent(x) && (x.lang || "") === (c.lang || ""));
-      tfExpected = peers.reduce((m, x) => Math.max(m, (posts[x.id] || []).length), 0);
-    }
+    /* Viber is judged purely by COINCIDENCE with a real drop (see the timefold block below), so it
+       needs no pre-computed count here. Its notifications are only ever read against the drops the
+       other channels define — the ones that DON'T line up with a drop are Viber's repeat "you have
+       a message" reminders, not new posts, and are ignored entirely. */
 
     let cells;
     if(mode === "content"){
@@ -1502,27 +1492,26 @@ function reconcile(channels, opt){
                        lateBy:l ? l.mins : null };
       });
     }else if(mode === "timefold"){
-      /* Per drop, decided by count first and time second:
-           · a notification lines up with this drop                → ✓ confirmed (proof it arrived)
-           · none lines up, but the count is SHORT and the phone
-             was online then                                       → ⚠ not seen — a likely miss, flag
-           · none lines up, but the count already covers the day
-             (or the phone was offline)                            → assumed (dashed ✓)
-         The count check is what stops a false ⚠ when Viber simply posted off the other channels'
-         clock: if it delivered as many posts as there were broadcasts, nothing is missing even
-         though the minutes did not line up. */
+      /* Viber, decided ONE drop at a time, purely by coincidence with the other channels:
+           · a notification lands inside this drop's window          → ✓ confirmed (proof it arrived)
+           · none does, but the phone was online then                → ⚠ not seen — a likely miss, flag
+           · none does, and the phone was offline then               → assumed (dashed ✓), can't verify
+         A notification that lines up with NO drop is Viber's repeat "you have a message" reminder,
+         re-sent because the phone did not open it — never a new post. Because a drop is confirmed by
+         PRESENCE of a nearby notification (not by any running total), those reminders are ignored
+         outright: they can neither inflate the count nor hide a real miss. */
       const mine = posts[c.id] || [];
       const beatMs = (checks.beats || []).map(t => new Date(t).getTime()).filter(n => isFinite(n));
       const COVER = 25 * 60e3;             // a heartbeat within 25 min of a drop = phone online then
-      let shortfall = Math.max(0, tfExpected - tfDelivered);   // broadcasts with no Viber post to spare
+      const VB_ALIGN = 30 * 60e3;          // Viber notification times drift, so match generously — but a
+                                           // notification an hour+ off a drop is a reminder, not that post
       cells = slots.map(s => {
         const start = new Date(s.at).getTime();
         const end = s.posts.reduce((m, p) => Math.max(m, new Date(p.ts).getTime()), start);
-        const aligned = mine.some(p => { const t = new Date(p.ts).getTime(); return t >= start - win * 60e3 && t <= end + win * 60e3; });
+        const aligned = mine.some(p => { const t = new Date(p.ts).getTime(); return t >= start - VB_ALIGN && t <= end + VB_ALIGN; });
         if(aligned) return { state:"ok", post:null };
         const online = beatMs.some(b => b >= start - COVER && b <= end + COVER);
-        if(shortfall > 0 && online){ shortfall--; return { state:"maybe", post:null }; }
-        return { state:"asm", post:null };
+        return online ? { state:"maybe", post:null } : { state:"asm", post:null };
       });
     }else{
       /* Nothing collected. For a channel a person can still answer for, each drop carries whatever
@@ -1538,9 +1527,10 @@ function reconcile(channels, opt){
     }
 
     /* a content-matched channel's count is how many drops its captions accounted for; a
-       time-folded one (Viber), how many drops a notification landed inside */
+       time-folded one (Viber), how many drops a notification actually CONFIRMED (landed inside) —
+       not how many notifications arrived, so repeat reminders never pad the number */
     const n = mode === "content" ? cells.filter(x => x.state === "okc").length
-            : mode === "timefold" ? tfDelivered            // distinct Viber posts that reached the channel
+            : mode === "timefold" ? cells.filter(x => x.state === "ok").length
             : countOf(c);
 
     /* Language is checkable wherever there are words, whether or not the times are usable. */
@@ -2039,7 +2029,7 @@ function downloadReportCard(rep, o, wo){
         });
         /* total badge */
         let tot, tc;
-        if(r.mode === "timefold"){ tot = r.count + " ✓"; tc = "#2dd4bf"; }
+        if(r.mode === "timefold"){ tot = r.count + "/" + slots.length + " ✓"; tc = r.cells.some(x => x.state === "maybe") ? "#e3b341" : "#2dd4bf"; }
         else if(r.mode === "none"){ tot = "—"; tc = "#6e7681"; }
         else if(r.expected == null){ tot = String(r.count); tc = "#8b949e"; }
         else { tot = r.count + "/" + r.expected; tc = r.status === "ok" ? "#3fb950" : r.status === "short" ? "#f85149" : "#e3b341"; }
@@ -2210,11 +2200,12 @@ function dailyCheckModal(o){
             ? `<span class="dc-pill un">${meta.unsupported ? "n/a" : "—"}</span>`
             : r.mode === "timefold"
               ? (() => { const conf = r.cells.filter(x => x.state === "ok").length,
-                               mb = r.cells.filter(x => x.state === "maybe").length;
+                               mb = r.cells.filter(x => x.state === "maybe").length,
+                               tot = rep.slots.length;
                   return `<span class="dc-pill ${mb ? "short" : "okc"}" title="${
                     mb ? mb + " drop(s) not seen while the phone was online — likely missing. " : ""}${
-                    conf} confirmed by a forwarded notification, the rest assumed delivered">${
-                    r.count}${conf ? ` · ${conf}✓` : ""}${mb ? ` · ${mb}⚠` : ""}</span>`; })()
+                    conf} of ${tot} drop(s) confirmed by a forwarded notification, the rest assumed delivered (repeat Viber reminders are ignored)">${
+                    conf}/${tot} ✓${mb ? ` · ${mb}⚠` : ""}</span>`; })()
             : r.expected === null ? `<span class="dc-pill un">${r.count}</span>`
             : `<span class="dc-pill ${r.suggested ? "guess" : r.status === "ok" ? "ok"
                 : r.status === "short" ? "short" : "sg"}"${
@@ -2399,8 +2390,8 @@ function dailyCheckModal(o){
           ${r.mode === "none"
             ? `<span class="dc-pill un">${meta.unsupported ? "not supported" : "no data"}</span>`
             : r.mode === "timefold"
-              ? (() => { const conf = r.cells.filter(x=>x.state==="ok").length, mb = r.cells.filter(x=>x.state==="maybe").length;
-                  return `<span class="dc-pill ${mb?"short":"okc"}" title="${conf} confirmed by notification, ${mb} not seen while online (likely missing), rest assumed">${r.count} delivered${conf?` · ${conf}✓`:""}${mb?` · ${mb}⚠`:""}</span>`; })()
+              ? (() => { const conf = r.cells.filter(x=>x.state==="ok").length, mb = r.cells.filter(x=>x.state==="maybe").length, tot = rep.slots.length;
+                  return `<span class="dc-pill ${mb?"short":"okc"}" title="${conf} of ${tot} drop(s) confirmed by a notification, ${mb} not seen while online (likely missing), rest assumed — repeat Viber reminders are ignored">${conf}/${tot} confirmed${mb?` · ${mb}⚠`:""}</span>`; })()
             : `<span class="dc-pill ${r.status === "ok" ? "ok" : r.status === "short" ? "short" : "sg"}">${
                 r.count}${r.expected === null ? "" : "/" + r.expected}</span>`}
           ${r.suggested ? `<span class="dc-pill sg">suggested</span>` : ""}
@@ -2609,8 +2600,9 @@ function dailyCheckModal(o){
           const meta = checks.meta[r.id] || {};
           const v = r.mode === "none"
             ? (meta.unsupported ? "not supported" : meta.dead ? "LINK DEAD" : "no data")
-            : r.mode === "timefold" ? `${r.count} delivered (${r.cells.filter(x=>x.state==="ok").length} confirmed by notification` +
-                (r.cells.filter(x=>x.state==="maybe").length ? `, ${r.cells.filter(x=>x.state==="maybe").length} NOT SEEN while online — verify` : "") + `)`
+            : r.mode === "timefold" ? `${r.cells.filter(x=>x.state==="ok").length}/${rep.slots.length} drop(s) confirmed by a notification` +
+                (r.cells.filter(x=>x.state==="maybe").length ? `, ${r.cells.filter(x=>x.state==="maybe").length} NOT SEEN while online — verify` : "") +
+                ` (repeat reminders ignored)`
             : r.expected === null ? `${r.count} (no target)` : `${r.count}/${r.expected}`;
           L.push(`    ${r.status === "ok" ? "ok   " : r.status === "short" ? "SHORT" :
                         r.status === "over" ? "OVER " : r.status === "seen" ? "seen " :

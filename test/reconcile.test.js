@@ -1041,22 +1041,43 @@ console.log("\n── viber never invents a drop and never accuses");
     ok(cells === "asm,ok", "one drop is confirmed (✓), the other assumed (✓) — neither is a miss", cells);
   }
 
-  /* THE real-world case the user hit: Viber delivered as many posts as there were broadcasts, but
-     at its OWN times (independent posting + notification drift), so almost none line up with the
-     other channels' drops. By COUNT it is complete, so it must NOT flag a pile of false misses. */
+  /* THE bug the user hit: Viber re-sends "you have a message" REMINDERS for a post the phone never
+     opened — minutes, then hours, apart. Those are not new posts. Judging Viber by COINCIDENCE with
+     a real drop (not by how many notifications arrived) makes them harmless: several notifications
+     around ONE drop still confirm exactly one drop, and a reminder that lines up with no drop is
+     ignored outright — it can neither pad the count nor invent a delivery. */
   {
     const rep = runV(c => {
-      c.posts.ytv = [P("y1", 300, VN_TEXT), P("y2", 200, VN_TEXT), P("y3", 100, VN_TEXT), P("y4", 40, VN_TEXT)];
-      c.posts.tgv = [P("t1", 301, VN_TEXT), P("t2", 201, VN_TEXT), P("t3", 101, VN_TEXT), P("t4", 41, VN_TEXT)];
-      // 4 Viber posts, but all at times that fall BETWEEN the drops (never within ±15m of one)
-      c.posts.vbv = [260, 160, 70, 20].map((m, i) => ({ externalId:"v"+i, ts:ago(m), kind:"video", text:"Sportsfc.vn: Video message" }));
-      c.beats = [300, 260, 200, 160, 100, 70, 40, 20].map(m => ago(m));   // phone online throughout
+      c.posts.ytv = [P("y1", 60, VN_TEXT)];
+      c.posts.tgv = [P("t1", 61, VN_TEXT)];                 // one real drop, ~60 min ago
+      c.posts.vbv = [
+        { externalId:"v-post", ts:ago(59), kind:"video", text:"Sportsfc.vn: Video message" },  // the real post, in the drop
+        { externalId:"v-rem1", ts:ago(50), kind:"video", text:"Sportsfc.vn: Video message" },  // a reminder, still near the drop
+        { externalId:"v-rem2", ts:ago(220), kind:"video", text:"Sportsfc.vn: Video message" }, // a reminder hours off, no drop there
+      ];
+      c.beats = [ago(60), ago(45)];
     });
     const r = rowOf(rep, "vbv");
-    ok(r.count === 4 && !r.cells.some(x => x.state === "maybe"),
-      "4 posts delivered for 4 broadcasts → NO false ⚠, even though times do not line up",
+    ok(r.count === 1, "one post + two reminders confirm ONE drop, not three",
       `count=${r.count} states=${r.cells.map(x => x.state).join(",")}`);
-    ok(!rep.alerts.some(a => a.id === "vbv"), "and no false 'likely missing' alert is raised");
+    ok(rep.slots.length === 1, "and the far-off reminder never becomes a drop of its own", `${rep.slots.length} slot(s)`);
+    ok(!rep.alerts.some(a => a.id === "vbv"), "no false alarm — the drop that happened was confirmed");
+  }
+
+  /* The flip side of coincidence-based judging: a drop the phone was online for but no notification
+     landed near IS a likely miss (⚠). Content went out on the other channels and the phone was up,
+     yet no Viber post came — worth a check, not a silent pass. */
+  {
+    const rep = runV(c => {
+      c.posts.ytv = [P("y1", 300, VN_TEXT), P("y2", 40, VN_TEXT)];
+      c.posts.tgv = [P("t1", 301, VN_TEXT), P("t2", 41, VN_TEXT)];       // two drops
+      c.posts.vbv = [{ externalId:"v1", ts:ago(299), kind:"video", text:"Sportsfc.vn: Video message" }];  // only the first aligns
+      c.beats = [300, 200, 100, 40].map(m => ago(m));                     // phone online throughout
+    });
+    const r = rowOf(rep, "vbv");
+    ok(r.count === 1 && r.cells.filter(x => x.state === "maybe").length === 1,
+      "one drop confirmed, the other (online, no aligned notification) flagged ⚠",
+      `count=${r.count} states=${r.cells.map(x => x.state).join(",")}`);
   }
 
   /* contrast: a GENUINE shortage — only 2 posts for 4 broadcasts, phone online → 2 flagged */
