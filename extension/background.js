@@ -802,11 +802,35 @@ function xParsePost(rawArticle, handle) {
 }
 /* ── end x parse ───────────────────────────────────────────────────────────── */
 
+/* one shared x.com tab serves every handle — same idea as instagramTab() */
+async function xTab() {
+  const open = await chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] });
+  if (open.length) return { tabId: open[0].id, reuse: true };
+  const tab = await chrome.tabs.create({ url: "https://x.com/", active: false });
+  await waitForLoad(tab.id);
+  return { tabId: tab.id, reuse: false };
+}
+
+/* X serves the logged-out profile HTML (with the schema.org microdata we parse) to a DOCUMENT-style
+   request, but a background CORS fetch from the service worker gets an empty client shell instead —
+   which is why the plain fetch returned no posts. So the request is made from INSIDE an x.com tab, a
+   same-origin fetch with the user's session, which x.com answers with the full page. */
 async function xFetchProfile(handle) {
-  const url = "https://x.com/" + encodeURIComponent(handle);
-  const r = await fetch(url, { credentials: "omit", cache: "no-store", headers: { Accept: "text/html" } });
-  if (r.status !== 200) throw new Error("X would not serve @" + handle + " (HTTP " + r.status + ").");
-  return r.text();
+  const tab = await xTab();
+  try {
+    const res = await runInTab(tab.tabId, async (h) => {
+      try {
+        const r = await fetch("https://x.com/" + encodeURIComponent(h), { credentials: "include", cache: "no-store" });
+        const html = await r.text();
+        return { status: r.status, html };
+      } catch (e) { return { status: 0, html: "", err: String(e && e.message || e) }; }
+    }, [handle]);
+    if (!res || res.status !== 200 || !res.html)
+      throw new Error("X would not serve @" + handle + (res && res.status ? " (HTTP " + res.status + ")" : ""));
+    return res.html;
+  } finally {
+    if (!tab.reuse) await chrome.tabs.remove(tab.tabId).catch(() => {});
+  }
 }
 
 async function xCollect(channels, onProgress) {
@@ -839,7 +863,7 @@ async function collect(channels, onProgress) {
   const fbChannels = channels.filter(c => c.platform === "facebook");
   const xChannels  = channels.filter(c => c.platform === "x");
 
-  /* ---- x, straight fetches from the user's IP (no tab, quick) ---- */
+  /* ---- x, read from inside a shared x.com tab (same-origin, gets the full server HTML) ---- */
   if (xChannels.length) {
     for (const r of await xCollect(xChannels, onProgress)) results.push(r);
   }
