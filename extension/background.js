@@ -802,56 +802,143 @@ function xParsePost(rawArticle, handle) {
 }
 /* ── end x parse ───────────────────────────────────────────────────────────── */
 
-/* one shared x.com tab serves every handle — same idea as instagramTab() */
-async function xTab() {
-  const open = await chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] });
-  if (open.length) return { tabId: open[0].id, reuse: true };
-  const tab = await chrome.tabs.create({ url: "https://x.com/", active: false });
-  await waitForLoad(tab.id);
-  return { tabId: tab.id, reuse: false };
-}
+/* Both of the earlier attempts turned out to depend on how the REQUEST was made, not just where
+   it left from. A background fetch() — even run from inside an x.com tab, same-origin, with the
+   user's cookies — carries Sec-Fetch-Dest: empty (it announces itself as a script's own request,
+   not a page load), and X answers that with an empty client shell. Only a genuine top-level
+   navigation (Sec-Fetch-Dest: document) gets the full render. So this opens a REAL tab at the
+   profile URL — an actual navigation, not a fetch — and reads the result from there.
 
-/* X serves the logged-out profile HTML (with the schema.org microdata we parse) to a DOCUMENT-style
-   request, but a background CORS fetch from the service worker gets an empty client shell instead —
-   which is why the plain fetch returned no posts. So the request is made from INSIDE an x.com tab, a
-   same-origin fetch with the user's session, which x.com answers with the full page. */
-async function xFetchProfile(handle) {
-  const tab = await xTab();
-  try {
-    const res = await runInTab(tab.tabId, async (h) => {
-      try {
-        const r = await fetch("https://x.com/" + encodeURIComponent(h), { credentials: "include", cache: "no-store" });
-        const html = await r.text();
-        return { status: r.status, html };
-      } catch (e) { return { status: 0, html: "", err: String(e && e.message || e) }; }
-    }, [handle]);
-    if (!res || res.status !== 200 || !res.html)
-      throw new Error("X would not serve @" + handle + (res && res.status ? " (HTTP " + res.status + ")" : ""));
-    return res.html;
-  } finally {
-    if (!tab.reuse) await chrome.tabs.remove(tab.tabId).catch(() => {});
+   Once that page has loaded, two different things can be true of it, tried in order:
+     1) the server-rendered HTML still carries schema.org microdata (the same shape api/collect.js
+        reads) — read straight off document.documentElement.outerHTML, richest data, tried first.
+     2) it does not (X's JS has since replaced that markup with the live app), so instead the
+        actual rendered tweets are read out of the DOM — real <time datetime> timestamps, but only
+        the words, the link and whatever the action bar's aria-label gives up for counts.
+   This second path is inherently more fragile than everywhere else in this file: X's DOM structure
+   changes without notice, unlike Facebook's and Instagram's which have stayed stable for a long
+   time. Expect it to need retouching if X reshuffles its markup again. */
+async function xDomScrape(handle, maxWaitMs, pollMs) {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const WANT = 10, MAXW = maxWaitMs || 20000, POLL = pollMs || 900;
+  const wantedAuthor = String(handle || "").toLowerCase();
+
+  function numFrom(s) {
+    const m = String(s || "").replace(/,/g, "").match(/([\d.]+)\s*([KkMm]?)/);
+    if (!m) return null;
+    let n = Number(m[1]);
+    if (/k/i.test(m[2])) n *= 1000; else if (/m/i.test(m[2])) n *= 1e6;
+    return Math.round(n);
   }
+  /* the action bar's group aria-label reads like "12 replies, 34 reposts, 56 likes, 78 views" */
+  function statsFrom(art) {
+    const grp = art.querySelector('[role="group"][aria-label]');
+    const label = (grp && grp.getAttribute("aria-label")) || "";
+    const out = {};
+    for (const [key, re] of [["comments", /([\d.,]+\s*[KkMm]?)\s*repl/i], ["reposts", /([\d.,]+\s*[KkMm]?)\s*repost/i],
+                              ["likes", /([\d.,]+\s*[KkMm]?)\s*like/i], ["views", /([\d.,]+\s*[KkMm]?)\s*view/i]]) {
+      const m = label.match(re);
+      if (m) out[key] = numFrom(m[1]);
+    }
+    return out;
+  }
+
+  function harvest() {
+    const posts = [], seen = new Set();
+    for (const art of document.querySelectorAll('article[data-testid="tweet"], article[role="article"]')) {
+      /* a repost/quote of someone else's tweet, or a promoted slot — not this account's own post */
+      if (art.querySelector('[data-testid="socialContext"]')) continue;
+      if (/promoted/i.test(art.getAttribute("aria-label") || "")) continue;
+
+      const timeEl = art.querySelector("time[datetime]");
+      if (!timeEl) continue;                              // still a loading placeholder
+      const ts = timeEl.getAttribute("datetime");
+      const link = timeEl.closest("a[href*='/status/']");
+      const href = link ? link.getAttribute("href") : "";
+      const idm = href.match(/\/status\/(\d+)/);
+      if (!idm) continue;
+      const id = idm[1];
+      if (seen.has(id)) continue;
+
+      /* confirm the author is the profile we asked for, not a quoted/embedded post from someone
+         else riding along inside the same article */
+      const nameBlock = art.querySelector('[data-testid="User-Name"]');
+      const authorHref = nameBlock ? (nameBlock.querySelector('a[href^="/"]') || {}).getAttribute?.("href") : "";
+      const author = String(authorHref || href.split("/status/")[0] || "").replace(/^\//, "").toLowerCase();
+      if (author && author !== wantedAuthor) continue;
+
+      seen.add(id);
+      const textEl = art.querySelector('[data-testid="tweetText"]');
+      const hasVideo = !!art.querySelector("video");
+      const photos = art.querySelectorAll('[data-testid="tweetPhoto"]').length;
+      posts.push({
+        externalId: id, ts: new Date(ts).toISOString(),
+        kind: hasVideo ? "video" : photos > 1 ? "carousel" : photos ? "photo" : "text",
+        text: (textEl ? textEl.innerText : "").trim(),
+        permalink: "https://x.com" + href.replace(/\?.*$/, ""),
+        thumb: (art.querySelector("video, [data-testid='tweetPhoto'] img") || {}).src || "",
+        ...statsFrom(art),
+      });
+    }
+    return posts;
+  }
+
+  const start = Date.now();
+  let best = [], stableRounds = 0, lastCount = -1;
+  while (Date.now() - start < MAXW) {
+    const found = harvest();
+    if (found.length > best.length) best = found;
+    if (found.length >= WANT) break;
+    stableRounds = found.length === lastCount ? stableRounds + 1 : 0;
+    lastCount = found.length;
+    if (stableRounds >= 3) break;                          // three polls with nothing new — stop asking
+    window.scrollBy(0, 1400);
+    await sleep(POLL);
+  }
+  return best.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
 async function xCollect(channels, onProgress) {
+  const XW = 22000, XP = 900;
   const out = [];
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
     onProgress(`X — @${handle} (${i + 1}/${channels.length})…`);
+    let tabId = null;
     try {
       if (!handle) throw new Error("No X handle for this channel");
-      const html = await xFetchProfile(handle);
-      const posts = xArticles(html).map(a => xParsePost(a, handle)).filter(Boolean);
-      /* zero posts is indistinguishable from a dead handle or X declining this particular request —
-         none of those is "posted nothing", so report it as unknown, exactly as the server does */
-      if (!posts.length) throw new Error("X rendered no posts for @" + handle + " — treat as unknown, not empty.");
+      const tab = await chrome.tabs.create({ url: "https://x.com/" + encodeURIComponent(handle), active: false });
+      tabId = tab.id;
+      await waitForLoad(tabId);
+
+      /* route 1: the page's own server-rendered HTML, if it still carries the microdata */
+      let posts = [], via = "microdata";
+      try {
+        const html = await runInTab(tabId, () => document.documentElement.outerHTML, []);
+        if (html) posts = xArticles(html).map(a => xParsePost(a, handle)).filter(Boolean);
+      } catch (e) { /* fall through to the DOM scrape */ }
+
+      /* route 2: the live, rendered timeline — X's own app, read the way a person reading the page
+         would see it. Only the words/time/link/counts are reliable this way, not the richer stats
+         and media the microdata carries when it is there. */
+      if (!posts.length) {
+        via = "dom";
+        posts = await runInTab(tabId, xDomScrape, [handle, XW, XP]);
+      }
+
+      /* zero posts is indistinguishable from a dead handle, a login wall, or X declining this
+         request — none of those is "posted nothing", so it is reported as unknown, never empty */
+      if (!posts.length) throw new Error("X rendered no posts for @" + handle + " — treat as unknown, not empty. " +
+        "(If your browser is not logged into x.com, log in and try again.)");
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
       out.push({ channelId: c.id, platform: "x", username: handle, ok: true,
-                 note: `${posts.length} post(s) via x.com (extension)`, posts, source: "extension-x" });
+                 note: `${posts.length} post(s) via x.com (extension, ${via})`, posts, source: "extension-x" });
     } catch (e) {
       out.push({ channelId: c.id, platform: "x", username: handle, ok: false,
                  note: String((e && e.message) || e), posts: [], source: "extension-x" });
+    } finally {
+      if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
     }
   }
   return out;
