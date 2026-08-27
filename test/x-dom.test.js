@@ -74,11 +74,15 @@ let pass = 0, fail = 0;
 const ok = (good, label, extra) => { good ? pass++ : fail++; console.log(`  ${good ? "pass" : "FAIL"}  ${label}${extra ? "  — " + extra : ""}`); };
 
 async function run(articles, handle) {
-  const document = { querySelectorAll: sel => (sel.includes("article") ? articles : []) };
+  const document = {
+    querySelectorAll: sel => (sel.includes("article") ? articles : []),
+    querySelector: () => null, body: { innerText: "" },
+  };
   const window = { scrollBy: () => {} };
   const setTimeout = (fn, ms) => { fn(); return 0; };   // resolve every poll instantly
   const fn = new Function("document", "window", "setTimeout", body + "\n;return xDomScrape;")(document, window, setTimeout);
-  return fn(handle, 500, 10);
+  const res = await fn(handle, 500, 10);
+  return res.posts;
 }
 
 (async () => {
@@ -98,6 +102,51 @@ async function run(articles, handle) {
   ], "sportsfc_vn");
   ok(posts.length === 0, "a repost, a promoted slot, and another author's tweet are all skipped",
     JSON.stringify(posts.map(p => p.externalId)));
+
+  console.log("\n── the real bug: X's timeline call is slow, and zero-so-far must not give up early");
+  /* the regression this guards: an early build treated "zero results, unchanged, three polls in a
+     row" as a reason to stop — but a slow first load looks EXACTLY like that for its first several
+     polls, so it was declaring "no posts" before X had even answered. Zero must keep polling for
+     the WHOLE time budget; only a count that has found something and then stops growing may bail
+     out early. */
+  {
+    let calls = 0;
+    const document = {
+      querySelectorAll: sel => {
+        if (!sel.includes("article")) return [];
+        calls++;
+        return calls < 6 ? [] : [tweet({ id: "555", mins: 5 })];   // nothing renders until the 6th poll
+      },
+      querySelector: () => null, body: { innerText: "" },
+    };
+    const window = { scrollBy: () => {} };
+    const setTimeout = (fn) => { fn(); return 0; };
+    const fn = new Function("document", "window", "setTimeout", body + "\n;return xDomScrape;")(document, window, setTimeout);
+    const res = await fn("sportsfc_vn", 5000, 10);          // plenty of polls at 10ms each before 5s
+    ok(res.posts.length === 1 && res.posts[0].externalId === "555",
+      "a post that only renders on the 6th poll is still found — zero-so-far did not bail out early",
+      `calls=${calls} posts=${JSON.stringify(res.posts.map(p => p.externalId))}`);
+  }
+
+  console.log("\n── when nothing is ever found, the diagnostic says WHY");
+  {
+    const mk = bodyText => new Function("document", "window", "setTimeout", body + "\n;return xDomScrape;")(
+      { querySelectorAll: () => [], querySelector: () => null, body: { innerText: bodyText } },
+      { scrollBy: () => {} }, fn => { fn(); return 0; }
+    );
+    let res = await mk("Log in to X\nSee what's happening in the world")("sportsfc_vn", 100, 10);
+    ok(res.posts.length === 0 && /not logged into x\.com/i.test(res.diag), "a login prompt is named as such", res.diag);
+
+    res = await mk("This account doesn't exist\nTry searching for another.")("sportsfc_vn", 100, 10);
+    ok(res.posts.length === 0 && /does not exist/i.test(res.diag), "a dead handle is named as such", res.diag);
+
+    res = await mk("These Tweets are protected. Only confirmed followers have access.")("sportsfc_vn", 100, 10);
+    ok(res.posts.length === 0 && /protected/i.test(res.diag), "a protected account is named as such", res.diag);
+
+    res = await mk("some ordinary page text with no recognisable signal")("sportsfc_vn", 100, 10);
+    ok(res.posts.length === 0 && /rendered nothing recognisable/i.test(res.diag),
+      "an unrecognised empty page still gets a plain, honest diagnostic (not a false claim)", res.diag);
+  }
 
   console.log("\n── media and stats");
   posts = await run([tweet({ id: "9", mins: 5, video: true, stats: "12 replies, 34 reposts, 56 likes, 5.6K views" })], "sportsfc_vn");

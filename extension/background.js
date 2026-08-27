@@ -889,13 +889,35 @@ async function xDomScrape(handle, maxWaitMs, pollMs) {
     const found = harvest();
     if (found.length > best.length) best = found;
     if (found.length >= WANT) break;
-    stableRounds = found.length === lastCount ? stableRounds + 1 : 0;
+    /* "nothing new across several polls" only means STOP once something has actually been found —
+       while it is still zero, X's own timeline call can simply not have answered yet (its GraphQL
+       fetch is asynchronous and slow on a first load), and bailing out on zero was cutting the wait
+       to ~3 polls instead of the full budget, so the answer was "no posts" before X had even tried
+       to render any. Zero must exhaust the whole window before giving up. */
+    if (found.length > 0) {
+      stableRounds = found.length === lastCount ? stableRounds + 1 : 0;
+      if (stableRounds >= 3) break;                        // three polls with no NEW posts — stop asking
+    }
     lastCount = found.length;
-    if (stableRounds >= 3) break;                          // three polls with nothing new — stop asking
     window.scrollBy(0, 1400);
     await sleep(POLL);
   }
-  return best.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  best.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  /* If nothing was ever found, say something more useful than silence: a login wall reads very
+     differently from a page that simply took its time, and the next person debugging this should
+     not have to guess which one happened. Checked only on the empty path — it costs nothing when
+     posts were actually found. */
+  let diag = "";
+  if (!best.length) {
+    const bodyText = (document.body && document.body.innerText || "").slice(0, 4000);
+    if (document.querySelector('a[href="/i/flow/login"], [data-testid="loginButton"], [data-testid="login"]') ||
+        /log in to x|sign in to x/i.test(bodyText)) diag = "a login prompt is showing — the browser is not logged into x.com";
+    else if (/this account doesn.t exist|user not found/i.test(bodyText)) diag = "X says this account does not exist";
+    else if (/these tweets are protected|this account.s tweets are protected/i.test(bodyText)) diag = "this account's posts are protected (private)";
+    else diag = `no tweet articles ever appeared in ${Math.round((Date.now() - start) / 1000)}s — X's page loaded but rendered nothing recognisable`;
+  }
+  return { posts: best, diag };
 }
 
 async function xCollect(channels, onProgress) {
@@ -922,15 +944,19 @@ async function xCollect(channels, onProgress) {
       /* route 2: the live, rendered timeline — X's own app, read the way a person reading the page
          would see it. Only the words/time/link/counts are reliable this way, not the richer stats
          and media the microdata carries when it is there. */
+      let diag = "";
       if (!posts.length) {
         via = "dom";
-        posts = await runInTab(tabId, xDomScrape, [handle, XW, XP]);
+        const res = await runInTab(tabId, xDomScrape, [handle, XW, XP]);
+        posts = (res && res.posts) || [];
+        diag = (res && res.diag) || "";
       }
 
       /* zero posts is indistinguishable from a dead handle, a login wall, or X declining this
-         request — none of those is "posted nothing", so it is reported as unknown, never empty */
-      if (!posts.length) throw new Error("X rendered no posts for @" + handle + " — treat as unknown, not empty. " +
-        "(If your browser is not logged into x.com, log in and try again.)");
+         request — none of those is "posted nothing", so it is reported as unknown, never empty.
+         diag names WHICH of those it actually was, from xDomScrape's own check of the page. */
+      if (!posts.length) throw new Error("X rendered no posts for @" + handle + " — treat as unknown, not empty." +
+        (diag ? " (" + diag + ")" : " (If your browser is not logged into x.com, log in and try again.)"));
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
       out.push({ channelId: c.id, platform: "x", username: handle, ok: true,
                  note: `${posts.length} post(s) via x.com (extension, ${via})`, posts, source: "extension-x" });
