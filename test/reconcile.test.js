@@ -476,6 +476,36 @@ ok(cr.expected === 2, "content matches never raise the target", `expected=${cr.e
     "the matched cell carries the post's banner and link through", JSON.stringify(cell && cell.post.permalink));
 })();
 
+/* ── the fixture DATE separates two identical-template posts ─────────────────
+   The real bug: SportsFC's captions are templated, so yesterday's "EFL Cup … 27 August" post and
+   today's "EFL Cup … 28 August" post share ~70% of their words. A Facebook page whose scraped
+   captions still held YESTERDAY's post was falsely credited for TODAY's drop. The date named in the
+   caption is what tells them apart, and a caption-match must respect it. */
+(() => {
+  const today = "NHẬN ĐỊNH EFL CUP LALIGA SPORTSFC FANS EFL Cup 26/27 📅 28 August 2026 1:30 ICT Xem ngay dự đoán Cole Palmer Enzo Fernandez Joao Pedro";
+  const yday  = "Góc nhìn về EFL Cup SPORTSFC FANS EFL Cup 26/27 📅 27 August 2026 1:45 ICT Xem ngay dự đoán Cole Palmer Enzo Fernandez Joao Pedro";
+  const run = fbCaps => {
+    const c = M.checks();
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    c.counts = {}; c.meta = {}; c.captions = { fbv: fbCaps };
+    c.posts = { ytv: [P("a", 60, today)] };            // the drop: today's EFL post
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+  /* first, prove the two captions really are ~identical on words alone (so only the date can split them) */
+  ok(M.contentScore(today, yday) >= 0.6, "the two days' EFL captions score as a match on words alone",
+    M.contentScore(today, yday).toFixed(2));
+  /* Facebook holding ONLY yesterday's caption must NOT be credited for today's drop */
+  let cr = run([yday]);
+  ok(crow(cr, "fbv").count === 0 && crow(cr, "fbv").cells[0].state === "miss",
+    "yesterday's identical-template caption does NOT match today's drop (different date)",
+    `${crow(cr, "fbv").count} ${crow(cr, "fbv").cells[0].state}`);
+  ok(cr.alerts.some(a => a.id === "fbv" && a.kind === "missing"), "and the miss is reported");
+  /* the SAME post (today's date) does match */
+  cr = run([today]);
+  ok(crow(cr, "fbv").count === 1 && crow(cr, "fbv").cells[0].state === "okc",
+    "the same-day caption matches", `${crow(cr, "fbv").count} ${crow(cr, "fbv").cells[0].state}`);
+})();
+
 /* ── X as a timeline channel ────────────────────────────────────────────────
    X hands over a real per-post timestamp for everything it renders, so — unlike Facebook — it is
    matched drop by drop, on time, the same as YouTube and Telegram. That distinction is the whole

@@ -1155,6 +1155,53 @@ function contentScore(a, b){
   for(const g of A) if(B.has(g)) inter++;
   return inter / Math.min(A.size, B.size);
 }
+
+/* WORD-level caption comparison — the transparent, strict test the report shows for the channels
+   whose captions we read (Facebook, Instagram). It asks a plain question anyone can check: how many
+   of THIS drop's words actually appear in that channel's caption? The same post across channels
+   shares nearly all of its words (players, competition, date, the whole body); a different post —
+   even the next day's same-competition one — shares only a handful. So a high overlap means the
+   reel went out; a low one means it did not, and the count says exactly how sure we are. Words are
+   normalised (lowercased, links/punctuation dropped) and 1-character noise removed. */
+function capWords(s){
+  return String(s || "").toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[#@][\wÀ-ỹ]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/).filter(w => w.length >= 2);
+}
+function captionOverlap(dropText, channelCaption){
+  const A = [...new Set(capWords(dropText))], B = [...new Set(capWords(channelCaption))];
+  /* Compare against the SHORTER caption's words (containment), because Facebook clips long captions
+     with a "see more" — the truncated text is a subset of the full one, and a subset should still
+     read as the same post. A genuinely different post shares only a few words either way. */
+  const small = A.length <= B.length ? A : B, bigSet = new Set(A.length <= B.length ? B : A);
+  if(small.length < 3) return { ratio: 0, matched: 0, total: small.length, missing: small };
+  const matched = small.filter(w => bigSet.has(w));
+  return { ratio: matched.length / small.length, matched: matched.length, total: small.length,
+           missing: small.filter(w => !bigSet.has(w)) };
+}
+/* the drop is credited to the channel only when most of its words are present */
+const CAPTION_MATCH = 0.6;
+
+/* The one thing that separates two otherwise-identical templated posts is the fixture they name —
+   its DATE. SportsFC captions carry it as "📅 28 August 2026" (and a kick-off time). Two posts a day
+   apart share ~70% of their words but name different dates, so this is what stops yesterday's
+   "EFL Cup … 27 August" caption from being credited for today's "EFL Cup … 28 August" drop. */
+const MON3 = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec";
+function fixtureDates(text){
+  const out = new Set(); const t = String(text || ""); let m;
+  const re = new RegExp("(\\d{1,2})\\s+(" + MON3 + ")", "gi");
+  while((m = re.exec(t))) out.add(m[1] + m[2].slice(0, 3).toLowerCase());
+  return out;
+}
+/* true when both captions name a date and NONE of them coincide → they are different fixtures */
+function differentFixture(a, b){
+  const A = fixtureDates(a), B = fixtureDates(b);
+  if(!A.size || !B.size) return false;                    // at least one has no date → can't tell, don't block
+  for(const d of A) if(B.has(d)) return false;            // a shared date → same fixture, allow
+  return true;                                            // both dated, no overlap → different day's post
+}
 /* which channels are judged on content instead of time. X is deliberately not here even though it
    shares the "browser-hostile" reputation Facebook has — its collector reads a real per-post
    timestamp out of the profile page's own schema.org microdata, so it gets genuine instants and
@@ -1449,40 +1496,44 @@ function reconcile(channels, opt){
          caption satisfy two of them whenever a day's posts were worded alike — the channel would
          read 2/2 having posted once, and a real miss would pass unnoticed. So: score every pairing,
          take them best-first, and never reuse a caption or fill a drop twice. */
-      /* A trigram score alone is not enough to say a caption IS a drop: these captions are templated
-         ("NHẬN ĐỊNH {competition}… {players}…"), so two DIFFERENT fixtures — even a day apart — score
-         0.6–0.8 against each other on wording alone. That is exactly how a Facebook page with only an
-         OLD "Góc nhìn về EFL Cup" caption got falsely credited for today's EFL drop. So a match must
-         ALSO agree on the fixture signature (the hashtags, numbers and proper nouns that name the
-         specific post) — unless the trigram score is so high (≥0.85) that the wording is all but
-         identical. Thin captions with too small a signature to judge fall back to that high bar. */
-      const SIG_CONFIRM = 0.5;
+      /* The match is WORD-LEVEL and shown in full, so nothing false can slip through unseen. For
+         each drop, against every caption this channel gave, count how many of the drop's words the
+         caption actually contains. Templated captions for DIFFERENT fixtures (even the next day's
+         same-competition post) share only a handful of words, so they fall well below the bar; the
+         SAME post shares nearly all of them. Best pairing wins, one caption per drop, never reused
+         — and the winning overlap (matched / total words) rides on the cell so the report can say
+         exactly "22 of 27 words matched" or, for a miss, "only 6 of 27 — reel did not go out". */
       const pairs = [];
       slots.forEach((s, i) => {
         const ref = refFor(s, c.lang);
         if(!ref) return;
         bag.forEach((cap, j) => {
-          const sc = contentScore(ref, cap.text);
-          if(sc < CONTENT_MATCH) return;
-          if(sc >= 0.85 || sigScore(ref, cap.text) >= SIG_CONFIRM) pairs.push({ i, j, sc });
+          if(differentFixture(ref, cap.text)) return;     // same template, different day → not this drop
+          const ov = captionOverlap(ref, cap.text);
+          if(ov.ratio >= CAPTION_MATCH) pairs.push({ i, j, ov });
         });
       });
-      pairs.sort((a, b) => b.sc - a.sc);
+      pairs.sort((a, b) => b.ov.ratio - a.ov.ratio);
       const taken = new Map(), usedCap = new Set();
       for(const p of pairs){
         if(taken.has(p.i) || usedCap.has(p.j)) continue;
-        taken.set(p.i, { cap:bag[p.j], score:p.sc });
+        taken.set(p.i, { cap:bag[p.j], ov:p.ov });
         usedCap.add(p.j);
       }
       cells = slots.map((s, i) => {
         const ref = refFor(s, c.lang);
         if(!ref) return { state:"none", post:null, why:"no same-language caption to compare with" };
         const hit = taken.get(i);
-        if(hit) return { state:"okc", score:hit.score, post:Object.assign({ ts:null }, hit.cap) };
-        /* the closest any caption came, so a miss carries its own evidence */
-        let best = 0;
-        for(const cap of bag){ const sc = contentScore(ref, cap.text); if(sc > best) best = sc; }
-        return { state:"miss", score:best };
+        if(hit) return { state:"okc", score:hit.ov.ratio, match:hit.ov,
+                         post:Object.assign({ ts:null }, hit.cap) };
+        /* the closest SAME-fixture caption came, so a miss carries its own evidence — a caption from
+           another day is not "close", it is a different post, so it does not count as the near-miss */
+        let best = { ratio:0, matched:0, total:0 };
+        for(const cap of bag){
+          if(differentFixture(ref, cap.text)) continue;
+          const ov = captionOverlap(ref, cap.text); if(ov.ratio > best.ratio) best = ov;
+        }
+        return { state:"miss", score:best.ratio, match:best };
       });
     }else if(mode === "timeline"){
       cells = slots.map(s => {
@@ -1586,12 +1637,21 @@ function reconcile(channels, opt){
     /* The gap is still reported as a gap — downgrading it would hide real misses, which is the
        whole point of the tool. The caveat rides along instead, so the reader knows whether the
        window was actually covered end to end before acting on it. */
-    if(status === "short")
+    if(status === "short"){
+      /* For a caption-matched channel (Facebook, Instagram) spell out the evidence the user asked
+         for: which drop the reel did not go out on, and exactly how many of the drop's words its
+         closest caption actually matched — so a miss is never a bare cross, it shows its working. */
+      const wordDetail = mode === "content"
+        ? cells.map((x, i) => (x.state === "miss" && slots[i] && x.match && x.match.total)
+            ? `${slots[i].time}: reel not found — only ${x.match.matched}/${x.match.total} words matched` : null).filter(Boolean)
+        : [];
       alerts.push({ kind:"missing", id:c.id, name:c.name, partial,
         text:`${expected - n} post${expected - n === 1 ? "" : "s"} missing` +
              (missedAt.length ? ` — nothing at ${missedAt.join(", ")}` : "") +
+             (wordDetail.length ? ` · ${wordDetail.join("; ")}` : "") +
              (partial ? ` · only ${all.length} post(s) could be read here and none predate the ` +
                         `window, so part of it was never seen` : "") });
+    }
     if(mode !== "none" && !foldsByTime(c) && n > maxPer)
       alerts.push({ kind:"over", id:c.id, name:c.name,
         text:`${n} posts in ${hours}h — over the ${maxPer} you would expect at most` });
@@ -1855,17 +1915,17 @@ async function runEverything(o){
   /* anything the popup left behind still counts */
   absorbBrowserRun();
 
-  /* The extension is a last-resort fallback for X ONLY. Facebook and Instagram are deliberately NOT
-     asked of it: the extension hands Facebook undated captions (no reliable per-post time), so when
-     the real timestamped reader (Apify) is down, a caption match cannot tell TODAY's post from a
-     same-topic one days ago — which is exactly how a stale "EFL Cup" caption got falsely credited
-     for today's EFL drop. Rather than show data we cannot trust, FB/IG read an honest "could not
-     read" while Apify is unavailable, and return to real, dated data the moment it is back. X keeps
-     its extension fallback because X's page carries real schema.org timestamps the extension reads
-     accurately. A server success (meta.ok) is always left alone. */
+  /* The extension is the FALLBACK for Facebook, Instagram and X — asked for a channel only when the
+     server could not read it (Apify credits out, an IP block, a key not set). A server success
+     (meta.ok) is left alone. The extension gives Facebook captions without a reliable per-post time,
+     so the content match below is deliberately strict and WORD-LEVEL: a drop is only credited to a
+     channel when most of the drop's words appear in that channel's caption — a stale, same-topic
+     caption from another day no longer matches, and the report shows exactly how many words matched
+     so a false "delivered" cannot slip through unseen. */
   const srvFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
   const browserChans = dcChannels(o)
-    .filter(c => c.platform === "x" && srvFailed(c.id))
+    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x")
+              && srvFailed(c.id))
     .map(c => ({ id:c.id, platform:c.platform, url:c.url,
                  handle:(c.handle || "").replace(/^@/, "").trim(),
                  username:(c.handle || "").replace(/^@/, "").trim() || chanLabelFromUrl(c.url) }));
@@ -2182,7 +2242,9 @@ function dailyCheckModal(o){
             const d = CELL[c.state];
             const tip = c.state === "lang" && c.detected
               ? `caption looks ${c.detected.lang.toUpperCase()} — ${c.detected.why}`
-              : c.state === "okc" ? `${Math.round(c.score * 100)}% caption match — ${d.t}`
+              : c.state === "okc" ? (c.match && c.match.total ? `caption match: ${c.match.matched}/${c.match.total} words — the same reel went out` : `${Math.round(c.score * 100)}% caption match — ${d.t}`)
+              : c.state === "miss" && c.match && c.match.total
+                ? `reel did NOT go out — closest caption matched only ${c.match.matched}/${c.match.total} words`
               : c.state === "miss" && c.score != null
                 ? `best caption match was only ${Math.round(c.score * 100)}%`
               : c.lateBy ? `posted, but ${fmtGap(c.lateBy)} behind the rest of this drop`
@@ -2410,8 +2472,10 @@ function dailyCheckModal(o){
         ${r.missedAt.length ? `<div class="dc-miss">nothing at ${esc(r.missedAt.join(", "))}</div>` : ""}
         ${meta.note ? `<div class="mt" style="margin-top:5px">${esc(meta.note)}</div>` : ""}
         ${r.mode === "content" ? r.cells.map((x, i) => x.state === "miss" && rep.slots[i]
-          ? `<div class="dc-miss">nothing matching the ${esc(rep.slots[i].time)} drop —
-               closest caption was ${Math.round((x.score || 0) * 100)}%</div>` : "").join("") : ""}
+          ? `<div class="dc-miss">reel did NOT go out for the ${esc(rep.slots[i].time)} drop —
+               closest caption matched only ${x.match ? x.match.matched + "/" + x.match.total : Math.round((x.score || 0) * 100) + "%"} words</div>`
+          : (x.state === "okc" && rep.slots[i] && x.match
+             ? `<div class="mt" style="margin-top:4px;color:var(--grn)">✓ ${esc(rep.slots[i].time)} drop — caption matched ${x.match.matched}/${x.match.total} words</div>` : "")).join("") : ""}
         ${mine.length ? `<div class="dc-plist">${mine.map(p => {
           const d = detectLang(p.text), bad = r.lang && d.lang && d.lang !== r.lang;
           const t = clean(p.text);
@@ -2623,10 +2687,11 @@ function dailyCheckModal(o){
           if(meta.note) L.push(`            how: ${meta.note}`);
           else if(r.mode === "none" && !meta.at) L.push(`            how: never attempted`);
           if(r.mode === "content")
-            L.push(`            matched on captions (${(checks.captions[r.id] || []).length} known)` +
+            L.push(`            matched on captions, word by word` +
               r.cells.map((x, i) => ` · ${rep.slots[i] ? rep.slots[i].time : i}:` +
-                (x.state === "okc" ? Math.round(x.score * 100) + "%"
-                 : x.state === "miss" ? "best " + Math.round((x.score || 0) * 100) + "%" : x.state)).join(""));
+                (x.match && x.match.total
+                  ? (x.state === "okc" ? `${x.match.matched}/${x.match.total} words ✓` : `only ${x.match.matched}/${x.match.total} words — NOT sent`)
+                  : x.state)).join(""));
           if(meta.routeLog && r.mode !== "timeline")
             for(const x of meta.routeLog)
               L.push(`            route ${(x.url || "?").replace(/^https?:\/\//, "")} → ` +
