@@ -265,7 +265,18 @@ async function collectYouTube(ch) {
      "no such channel". Under load it serves Google's generic 404 page — byte-for-byte the same
      1613 bytes for a real channel id as for one invented at random — so the status carries no
      information about existence and may well clear on a second ask. */
-  const r = await get("https://www.youtube.com/feeds/videos.xml?channel_id=" + id, null, [404]);
+  /* YouTube serves this feed intermittently from a datacenter IP — the SAME valid channel id comes
+     back 200, then 404, then 500, seemingly at random (a soft rate-limit, not a real "no such
+     channel"). Observed ~50% success per fetch, so several rounds catch a good one where a single
+     ask would have wrongly reported the channel dead. Each get() already tries twice; three rounds
+     with backoff make a persistent false 404 very unlikely. */
+  const YT_RETRY = [404, 429, 500, 502, 503, 504, 522, 524];
+  let r;
+  for (let i = 0; i < 3; i++) {
+    r = await get("https://www.youtube.com/feeds/videos.xml?channel_id=" + id, null, [404]);
+    if (YT_RETRY.indexOf(r.status) === -1) break;   // a 200, or a real answer like 403 → stop asking
+    if (i < 2) await new Promise(res => setTimeout(res, 900 * (i + 1)));
+  }
   if (r.status !== 200) {
     /* Resolution reached a live channel page, so the channel is certainly there; whatever the
        feed is doing, this is not an empty channel and must not be read as one. */

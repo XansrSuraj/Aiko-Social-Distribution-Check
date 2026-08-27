@@ -49,20 +49,26 @@ const check = (good, label, extra) => {
 };
 
 (async () => {
+  /* YouTube serves this feed intermittently from a datacenter IP (200/404/500 for the SAME valid
+     channel), so collectYouTube asks in up to THREE rounds; each round is a get() that itself tries
+     twice on a retryable status. So a status that recovers is caught in 2 fetches, while a
+     persistently-failing feed is only given up on after 6 (3 rounds × 2). A real answer like 403 is
+     never retried. */
+  const S6 = s => [s, s, s, s, s, s];   // the same failing status for every fetch — a persistent outage
   const cases = [
     /* [ label, channel, statuses returned in order, expected ok, expected fetch count ] */
     ["200 — answered, no retry", YT, [200], true, 1],
     ["500 then 200 — recovers", YT, [500, 200], true, 2],
-    ["500 twice — reports the failure", YT, [500, 500], false, 2],
+    ["500 persistently — reports the failure", YT, S6(500), false, 6],
     ["503 then 200 — recovers", YT, [503, 200], true, 2],
     ["429 then 200 — recovers", YT, [429, 200], true, 2],
     ["403 — final, not retried", YT, [403], false, 1],
 
     /* The YouTube feed is the one place 404 is retried. YouTube does not use it to mean "no such
        channel" — under load it serves Google's generic 404 page, identical bytes for a real
-       channel id and an invented one, so the status says nothing and may clear on a second ask. */
+       channel id and an invented one, so the status says nothing and may clear on a later ask. */
     ["YouTube feed 404 then 200 — recovers", YT, [404, 200], true, 2],
-    ["YouTube feed 404 twice — reports it", YT, [404, 404], false, 2],
+    ["YouTube feed 404 persistently — reports it", YT, S6(404), false, 6],
 
     /* Telegram means it. t.me answering 404 is a real statement about a real channel, so retrying
        would only waste a request and delay an honest answer. */
@@ -77,7 +83,7 @@ const check = (good, label, extra) => {
   }
 
   /* the failure text has to steer the reader away from "the channel is empty" */
-  const { res: blocked } = await runWith([404, 404], YT);
+  const { res: blocked } = await runWith([404, 404, 404, 404, 404, 404], YT);
   check(/unknown, not empty/.test(blocked.note), "a refused feed says unknown, not empty", blocked.note);
 
   /* a connection that never answers has to say so in words the reader can act on */

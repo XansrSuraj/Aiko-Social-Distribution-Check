@@ -1095,15 +1095,27 @@ function detectLang(text){
   if(RX_THAI.test(body)) return { lang:"th", why:"Thai script" };
   if(RX_CJK.test(body))  return { lang:"zh", why:"Chinese characters" };
 
+  const letters = body.replace(/[^A-Za-zÀ-ỹ฀-๿一-鿿]/g, "").length || 1;
   const uniq = hits(body, VN_UNIQUE), tones = hits(body, VN_TONES);
   const vnw = hits(body, VN_WORDS), enw = hits(body, EN_WORDS);
+  const vnLetters = uniq + tones;                              // Vietnamese-specific letters
+  const vnPct = Math.round(vnLetters / letters * 100);
+  /* Vietnamese is written mostly in plain Latin letters, so "50% of the letters carry a diacritic"
+     is the wrong test — real Vietnamese captions would fail it. Instead weigh the Vietnamese signal
+     (its own letters + its function words) against the English one, and only call a post Vietnamese
+     when that signal clearly WINS. A couple of stray accented characters in an English caption
+     (a player's name, a borrowed word) no longer flip the whole post — which is what was raising a
+     false ⚠ on the English fans channels. The exact counts ride out in `why` so the report can show
+     precisely what was seen ("3 VN letters — 4% of the text"), at the top, next to the flag. */
+  const vnScore = vnw * 3 + vnLetters, enScore = enw * 3;
+  const why = `${vnw} VN word(s) + ${vnLetters} VN letter(s) (${vnPct}% of the text) vs ${enw} EN word(s)`;
+  const out = extra => Object.assign({ vnPct, vnLetters, vnw, enw }, extra);
 
-  if(uniq >= 1) return { lang:"vi", why:`${uniq} Vietnamese-only letter${uniq === 1 ? "" : "s"}` };
-  if(vnw >= 1)  return { lang:"vi", why:`${vnw} Vietnamese word${vnw === 1 ? "" : "s"}` };
-  if(tones >= 4 && tones > enw) return { lang:"vi", why:`${tones} tone marks` };
-  if(enw >= 2)  return { lang:"en", why:`${enw} English words` };
-  if(tones >= 2 && enw === 0) return { lang:"vi", why:`${tones} tone marks, no English` };
-  return { lang:"", why:"no clear signal" };
+  if((vnw >= 1 || vnLetters >= 2) && vnScore > enScore) return out({ lang:"vi", why });
+  if(enw >= 1 && enScore >= vnScore)                    return out({ lang:"en", why });
+  if(vnLetters >= 3 && vnPct >= 12 && enw === 0)        return out({ lang:"vi", why });
+  if(enw >= 2)                                          return out({ lang:"en", why });
+  return out({ lang:"", why:"no clear signal" });
 }
 
 /* ── matching on what a post said ────────────────────────────────────────
