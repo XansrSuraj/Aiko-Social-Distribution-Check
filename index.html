@@ -1449,13 +1449,22 @@ function reconcile(channels, opt){
          caption satisfy two of them whenever a day's posts were worded alike — the channel would
          read 2/2 having posted once, and a real miss would pass unnoticed. So: score every pairing,
          take them best-first, and never reuse a caption or fill a drop twice. */
+      /* A trigram score alone is not enough to say a caption IS a drop: these captions are templated
+         ("NHẬN ĐỊNH {competition}… {players}…"), so two DIFFERENT fixtures — even a day apart — score
+         0.6–0.8 against each other on wording alone. That is exactly how a Facebook page with only an
+         OLD "Góc nhìn về EFL Cup" caption got falsely credited for today's EFL drop. So a match must
+         ALSO agree on the fixture signature (the hashtags, numbers and proper nouns that name the
+         specific post) — unless the trigram score is so high (≥0.85) that the wording is all but
+         identical. Thin captions with too small a signature to judge fall back to that high bar. */
+      const SIG_CONFIRM = 0.5;
       const pairs = [];
       slots.forEach((s, i) => {
         const ref = refFor(s, c.lang);
         if(!ref) return;
         bag.forEach((cap, j) => {
           const sc = contentScore(ref, cap.text);
-          if(sc >= CONTENT_MATCH) pairs.push({ i, j, sc });
+          if(sc < CONTENT_MATCH) return;
+          if(sc >= 0.85 || sigScore(ref, cap.text) >= SIG_CONFIRM) pairs.push({ i, j, sc });
         });
       });
       pairs.sort((a, b) => b.sc - a.sc);
@@ -1846,18 +1855,17 @@ async function runEverything(o){
   /* anything the popup left behind still counts */
   absorbBrowserRun();
 
-  /* Every readable platform now has a server-side reader: YouTube and Telegram directly, and X,
-     Facebook and Instagram through their APIs (twitterapi.io / Apify). The extension is a FALLBACK
-     ONLY — asked for a channel solely when the server could not read it (an API key not set, an
-     outage, an IP block). A server success (meta.ok) is left alone, so a healthy run never opens a
-     browser tab and, crucially, never layers a second, differently-keyed copy of the same posts on
-     top of the clean server ones (the extension keys Instagram reels by shortcode where the API
-     keys them by numeric id — running both is exactly what double-counted a channel and invented a
-     day of "missing" posts). */
+  /* The extension is a last-resort fallback for X ONLY. Facebook and Instagram are deliberately NOT
+     asked of it: the extension hands Facebook undated captions (no reliable per-post time), so when
+     the real timestamped reader (Apify) is down, a caption match cannot tell TODAY's post from a
+     same-topic one days ago — which is exactly how a stale "EFL Cup" caption got falsely credited
+     for today's EFL drop. Rather than show data we cannot trust, FB/IG read an honest "could not
+     read" while Apify is unavailable, and return to real, dated data the moment it is back. X keeps
+     its extension fallback because X's page carries real schema.org timestamps the extension reads
+     accurately. A server success (meta.ok) is always left alone. */
   const srvFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
   const browserChans = dcChannels(o)
-    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x")
-              && srvFailed(c.id))
+    .filter(c => c.platform === "x" && srvFailed(c.id))
     .map(c => ({ id:c.id, platform:c.platform, url:c.url,
                  handle:(c.handle || "").replace(/^@/, "").trim(),
                  username:(c.handle || "").replace(/^@/, "").trim() || chanLabelFromUrl(c.url) }));
