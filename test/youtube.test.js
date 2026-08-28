@@ -70,7 +70,7 @@ function load() { delete require.cache[require.resolve(MOD)]; return require(MOD
    Returns what happened as well as the result, because several of these tests are about which
    requests were made rather than what came back. */
 function run(world, channel, hours) {
-  const seen = { rss: 0, players: [], pages: [], api: [] };
+  const seen = { rss: 0, players: [], watch: [], pages: [], api: [] };
   global.fetch = async (url, opts) => {
     url = String(url);
     const ok = (obj, status) => ({
@@ -81,7 +81,9 @@ function run(world, channel, hours) {
 
     if (/feeds\/videos\.xml/.test(url)) { seen.rss++; return ok("<html>404</html>", 404); }
 
-    if (/googleapis\.com/.test(url)) {
+    /* only the Data API lives here — youtubei.googleapis.com is a different thing entirely and
+       must fall through to the InnerTube branch below */
+    if (/googleapis\.com\/youtube\/v3/.test(url)) {
       const res = /\/channels\?/.test(url) ? "channels"
                 : /\/playlistItems\?/.test(url) ? "playlistItems" : "videos";
       seen.api.push(res);
@@ -92,10 +94,22 @@ function run(world, channel, hours) {
     }
 
     if (/youtubei\/v1\/player/.test(url)) {
+      const host = /googleapis/.test(url) ? "googleapis" : "www";
       const vid = JSON.parse(opts.body).videoId;
-      seen.players.push(vid);
+      seen.players.push(host + ":" + vid);
+      if ((world.block || []).indexOf(host) !== -1) return ok("", 403);
       const p = world.players[vid];
       return p ? ok(p) : ok("", 404);
+    }
+
+    if (/\/watch\?v=/.test(url)) {
+      const vid = url.split("v=")[1];
+      seen.watch.push(vid);
+      if ((world.block || []).indexOf("watch") !== -1) return ok("", 403);
+      const p = world.players[vid];
+      if (!p) return ok("", 404);
+      /* the real page inlines the very object InnerTube would have returned */
+      return ok("<script>var ytInitialPlayerResponse = " + JSON.stringify(p) + ";</script>");
     }
 
     const tab = /\/shorts$/.test(url) ? "shorts" : "videos";
@@ -245,6 +259,49 @@ const BY_ID = { id: "y", platform: "youtube", url: "https://youtube.com/channel/
     check(res.posts.length === 1 && res.posts[0].externalId === "vid00000001",
       "a recommended video from another channel is not counted as this channel's post",
       "posts=" + res.posts.map(p => p.externalId).join(","));
+  }
+
+  /* ── the routes to one video's metadata, in the order they are tried ──
+     Production found this the hard way: InnerTube on www.youtube.com answers from a home
+     connection and refuses from Vercel, which left the first version of this reader loading the
+     channel page fine and then failing on every video. So the route matters, and each step down
+     the chain is pinned here. */
+  {
+    const world = () => ({
+      videos: ["vid00000001"], shorts: [],
+      players: { vid00000001: player("vid00000001", hoursAgo(2), 600) },
+    });
+
+    const plain = await run(world(), YT);
+    check(plain.res.ok === true && plain.seen.players[0] === "www:vid00000001" &&
+          plain.seen.watch.length === 0,
+      "InnerTube on www is tried first and nothing else is asked when it answers",
+      plain.seen.players.join(","));
+
+    const noWww = await run(Object.assign(world(), { block: ["www"] }), YT);
+    check(noWww.res.ok === true && noWww.res.posts.length === 1 &&
+          noWww.seen.players.indexOf("googleapis:vid00000001") !== -1,
+      "when www refuses — which is what Vercel sees — the API host is tried next",
+      "ok=" + noWww.res.ok + " routes=" + noWww.seen.players.join(","));
+    check(/googleapis/.test(noWww.res.note),
+      "and the note names the route that answered, so this is diagnosable from the report",
+      noWww.res.note);
+
+    const pageOnly = await run(Object.assign(world(), { block: ["www", "googleapis"] }), YT);
+    check(pageOnly.res.ok === true && pageOnly.res.posts.length === 1 &&
+          pageOnly.seen.watch.length === 1,
+      "with both InnerTube hosts refusing, the watch page still carries the video",
+      "ok=" + pageOnly.res.ok + " watch=" + pageOnly.seen.watch.length);
+    check(pageOnly.res.posts[0] && pageOnly.res.posts[0].ts &&
+          pageOnly.res.posts[0].kind === "video",
+      "and the watch page yields the same shape as InnerTube would have",
+      pageOnly.res.posts[0] && pageOnly.res.posts[0].kind + " " + pageOnly.res.posts[0].ts);
+
+    const none = await run(Object.assign(world(), { block: ["www", "googleapis", "watch"] }), YT);
+    check(none.res.ok === false && /unknown, not empty/.test(none.res.note),
+      "every route refusing is still unknown, never an empty channel", none.res.note);
+    check(/googleapis/.test(none.res.note) && /watch page/.test(none.res.note),
+      "and the note lists what was tried and how each refused", none.res.note);
   }
 
   /* ── the official API, when a key is set ── */

@@ -386,28 +386,102 @@ function ytCreds(html) {
   };
 }
 
-/* get() is GET-only and InnerTube wants a POST, so this carries its own timeout. A video that
-   will not answer comes back null and is skipped — one unreadable video must not cost the other
-   nine — and the caller refuses to report the channel at all if none of them answered. */
-async function ytPlayer(vid, creds) {
+/* One video's metadata, by whichever route will answer. The order matters and was settled by
+   what production actually does, not by what is tidiest:
+
+     1. InnerTube on www.youtube.com — small JSON, the front end's own call. Answers from a home
+        connection and, at least sometimes, refuses from a datacenter.
+     2. InnerTube on youtubei.googleapis.com — the same API on Google's API host, which is not
+        behind the same front-end gate.
+     3. the watch page, scraped. A plain GET of a page anybody can open, which is the one thing
+        that kept working from Vercel throughout. About a megabyte a video, so it is the last
+        resort rather than the first, but it is the one that does not depend on a gate.
+
+   Every route reduces to the same shape as the InnerTube response so ytPost has one input to
+   read. `why` records which route answered, so the report can say so and the next person does
+   not have to rediscover any of this. */
+
+const YT_INNERTUBE_HOSTS = ["https://www.youtube.com", "https://youtubei.googleapis.com"];
+
+async function ytInnertube(host, vid, creds) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT);
   try {
-    const r = await fetch("https://www.youtube.com/youtubei/v1/player?key=" +
-                          encodeURIComponent(creds.key), {
+    const r = await fetch(host + "/youtubei/v1/player?key=" + encodeURIComponent(creds.key), {
       method: "POST", signal: ctl.signal,
       headers: { "Content-Type": "application/json", "User-Agent": UA,
-                 "Accept-Language": "en-US,en;q=0.9" },
+                 "Accept-Language": "en-US,en;q=0.9", "Origin": "https://www.youtube.com",
+                 "X-YouTube-Client-Name": "1", "X-YouTube-Client-Version": creds.ver },
       body: JSON.stringify({
         videoId: vid,
-        context: { client: { clientName: "WEB", clientVersion: creds.ver, hl: "en" } },
+        context: { client: { clientName: "WEB", clientVersion: creds.ver, hl: "en",
+                             gl: "US", userAgent: UA } },
       }),
     });
-    if (r.status !== 200) return null;
-    return await r.json();
+    if (r.status !== 200) return { fail: "HTTP " + r.status };
+    const j = await r.json();
+    /* a 200 that carries no microformat is a refusal wearing a success code */
+    if (!j || !j.microformat) {
+      return { fail: (j && j.playabilityStatus && j.playabilityStatus.status) || "no microformat" };
+    }
+    return { j };
   } catch (e) {
-    return null;
+    return { fail: String((e && e.message) || e).slice(0, 60) };
   } finally { clearTimeout(timer); }
+}
+
+/* The watch page carries the same microformat block InnerTube would have returned, inlined as
+   ytInitialPlayerResponse. Pulling the whole object out and reusing the InnerTube shape keeps
+   this from becoming a second parser to maintain. */
+async function ytWatch(vid) {
+  let r;
+  try { r = await get("https://www.youtube.com/watch?v=" + vid); }
+  catch (e) { return { fail: String((e && e.message) || e).slice(0, 60) }; }
+  if (r.status !== 200) return { fail: "watch HTTP " + r.status };
+  const m = r.body.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:<\/script>|var )/s);
+  if (m) {
+    try {
+      const j = JSON.parse(m[1]);
+      if (j && j.microformat) return { j };
+    } catch (e) { /* fall through to the field-by-field read below */ }
+  }
+  /* The page is served in more than one shape and the block above is not always parseable in
+     one piece. These four fields are all ytPost needs, and each appears once with a stable key,
+     so reading them individually is sturdier here than insisting on valid JSON. */
+  const one = re => (r.body.match(re) || [])[1] || "";
+  const when = one(/"uploadDate"\s*:\s*"([^"]+)"/) || one(/"publishDate"\s*:\s*"([^"]+)"/) ||
+               one(/itemprop="uploadDate"[^>]*content="([^"]+)"/);
+  if (!when) return { fail: "no date on the watch page" };
+  return { j: {
+    microformat: { playerMicroformatRenderer: { uploadDate: when } },
+    videoDetails: {
+      videoId: vid,
+      title: decodeXml(one(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/).replace(/\\"/g, '"')),
+      shortDescription: decodeXml(one(/"shortDescription"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+        .replace(/\\n/g, "\n").replace(/\\"/g, '"')),
+      lengthSeconds: one(/"lengthSeconds"\s*:\s*"(\d+)"/),
+      viewCount: one(/"viewCount"\s*:\s*"(\d+)"/),
+      channelId: one(/"channelId"\s*:\s*"(UC[\w-]{20,})"/),
+      thumbnail: { thumbnails: [{ url: "https://i.ytimg.com/vi/" + vid + "/hqdefault.jpg" }] },
+    },
+  } };
+}
+
+/* A video that will not answer by any route comes back null and is skipped — one unreadable
+   video must not cost the other nine — and the caller refuses to report the channel at all if
+   none of them answered. */
+async function ytMeta(vid, creds, why) {
+  const tried = [];
+  for (const host of YT_INNERTUBE_HOSTS) {
+    const out = await ytInnertube(host, vid, creds);
+    if (out.j) { why.route = why.route || new URL(host).hostname; return out.j; }
+    tried.push(new URL(host).hostname + ": " + out.fail);
+  }
+  const w = await ytWatch(vid);
+  if (w.j) { why.route = why.route || "watch page"; return w.j; }
+  tried.push("watch page: " + w.fail);
+  if (!why.tried) why.tried = tried.join("; ");
+  return null;
 }
 
 function ytPost(vid, j, isShort) {
@@ -483,12 +557,13 @@ async function collectYouTubeWeb(ch, cutoff) {
   }
 
   const posts = [];
+  const why = { route: "", tried: "" };
   let read = 0, looked = 0;
   for (let i = 0; i < order.length && looked < YT_MAX; i += YT_ROUND) {
     const batch = order.slice(i, i + YT_ROUND);
     looked += batch.length;
     const got = await Promise.all(
-      batch.map(v => ytPlayer(v, creds).then(j => ytPost(v, j, shorts.has(v)))));
+      batch.map(v => ytMeta(v, creds, why).then(j => ytPost(v, j, shorts.has(v)))));
     let fresh = 0;
     for (const p of got) {
       if (!p) continue;
@@ -506,14 +581,18 @@ async function collectYouTubeWeb(ch, cutoff) {
     if (!fresh && posts.length) break;
   }
   if (!read) {
+    /* Naming every route that was tried and how each one refused is what turns the next "no data
+       again" into something diagnosable from the report, instead of from a redeploy. The first
+       version of this reader failed exactly here on Vercel while working from a desk, and the
+       note said only that it had failed. */
     throw new Error("YouTube would not describe any of this channel's videos — treat this " +
-                    "channel as unknown, not empty");
+                    "channel as unknown, not empty. Tried " + (why.tried || "every route") + ".");
   }
 
   return {
     posts, resolved, source: "youtube-web",
-    note: "Read from the channel page directly — no API key is set. Setting YOUTUBE_API_KEY " +
-          "switches this to the official API, which is the sturdier of the two.",
+    note: "Read from the channel page via " + (why.route || "InnerTube") + " — no API key is " +
+          "set. Setting YOUTUBE_API_KEY switches this to the official API, which is sturdier.",
   };
 }
 
