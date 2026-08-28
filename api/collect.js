@@ -287,10 +287,27 @@ async function collectYouTubeApi(ch, cutoff) {
   let id = t.id, resolved = null;
   if (!id) {
     if (!t.handle) throw new Error("No YouTube handle or channel id could be read from this channel");
-    const j = await ytApi("channels", "part=id&forHandle=" +
-                          encodeURIComponent("@" + t.handle.replace(/^@/, "")));
-    id = j.items && j.items[0] && j.items[0].id;
-    if (!id) throw new Error("YouTube Data API does not know the handle @" + t.handle.replace(/^@/, ""));
+    const handle = t.handle.replace(/^@/, "");
+    let apiSaid = "";
+    try {
+      const j = await ytApi("channels", "part=id&forHandle=" + encodeURIComponent("@" + handle));
+      id = j.items && j.items[0] && j.items[0].id;
+    } catch (e) {
+      /* held rather than thrown, because the page below may still resolve it — but kept, because
+         "could not find a channel id" would otherwise be the whole story when the real story is
+         a key that was refused */
+      apiSaid = String(e.message || e);
+    }
+    if (!id) {
+      /* The channel page is the one YouTube surface that answers a datacenter without a key, so
+         it is a better backstop here than a second API call. Costs a fetch, not a quota unit,
+         and both channels carry a pinned ytChannelId anyway — this is for a new one. */
+      try {
+        const html = await ytPage("/@" + encodeURIComponent(handle));
+        id = (html.match(/"externalId"\s*:\s*"(UC[\w-]{20,})"/) || [])[1] || "";
+      } catch (e) { /* reported as a failure to resolve, just below */ }
+    }
+    if (!id) throw new Error(apiSaid || "Could not find a channel id for @" + handle);
     resolved = { ytChannelId: id };
   }
 

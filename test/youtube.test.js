@@ -336,8 +336,11 @@ const BY_ID = { id: "y", platform: "youtube", url: "https://youtube.com/channel/
   {
     /* the whole reason reader 2 is kept: a key that stops working is a note, not an outage */
     process.env.YOUTUBE_API_KEY = "test-key";
-    const dead = Object.assign({}, API_WORLD, { api: { channels: { status: 403, body: {
-      error: { message: "quotaExceeded", errors: [{ reason: "quotaExceeded" }] } } } } });
+    /* an exhausted quota is exhausted for every endpoint, not just the first one asked */
+    const out = { status: 403, body: {
+      error: { message: "quotaExceeded", errors: [{ reason: "quotaExceeded" }] } } };
+    const dead = Object.assign({}, API_WORLD,
+      { api: { channels: out, playlistItems: out, videos: out } });
     const { res } = await run(dead, YT);
     check(res.ok === true && res.source === "youtube-web" && res.posts.length === 1,
       "an over-quota key falls back to the page reader instead of failing the channel",
@@ -349,8 +352,10 @@ const BY_ID = { id: "y", platform: "youtube", url: "https://youtube.com/channel/
   {
     /* both readers down is the one case that must fail, and it must still not read as empty */
     process.env.YOUTUBE_API_KEY = "test-key";
+    const bad = { status: 403, body: {
+      error: { message: "bad key", errors: [{ reason: "keyInvalid" }] } } };
     const { res } = await run({ videos: [], players: {}, pageStatus: 503,
-      api: { channels: { status: 403, body: { error: { message: "bad key", errors: [{ reason: "keyInvalid" }] } } } },
+      api: { channels: bad, playlistItems: bad, videos: bad },
     }, YT);
     check(res.ok === false && /unknown, not empty/.test(res.note) && /refused the key/.test(res.note),
       "with both readers down the note names both failures and still says unknown", res.note);

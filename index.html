@@ -762,8 +762,11 @@ const blank = () => ({
 const SPORTSFC = {
   id: "sportsfc", name: "SportsFC",
   socials: [
-    { id:"yt-vn",   platform:"youtube",   url:"https://youtube.com/@SportsFC-vn",   handle:"@SportsFC-vn",   note:"vietnamese" },
-    { id:"yt-fans", platform:"youtube",   url:"https://youtube.com/@sportsfc_fans", handle:"@sportsfc_fans", note:"english" },
+    /* ytChannelId is the UC… id the YouTube API actually takes; a handle has to be looked up to
+       reach it. Pinned here because the lookup is the one step that can fail on its own, and
+       because skipping it saves a quota unit on every run. */
+    { id:"yt-vn",   platform:"youtube",   url:"https://youtube.com/@SportsFC-vn",   handle:"@SportsFC-vn",   note:"vietnamese", ytChannelId:"UCOn89EhBv7qavXWvXFKw1FA" },
+    { id:"yt-fans", platform:"youtube",   url:"https://youtube.com/@sportsfc_fans", handle:"@sportsfc_fans", note:"english",    ytChannelId:"UCbqnwmEMgqGH2WQ-UpbX2lA" },
     { id:"tg-vn",   platform:"telegram",  url:"https://t.me/sportsfc_vn",           handle:"sportsfc_vn",    note:"vietnamese" },
     { id:"tg-fans", platform:"telegram",  url:"https://t.me/sportsfc_fans",         handle:"sportsfc_fans",  note:"english" },
     { id:"x-vn",    platform:"x",         url:"https://x.com/Sportsfcvn",           handle:"Sportsfcvn",     note:"vietnamese" },
@@ -1742,7 +1745,8 @@ function dcChannels(o){
     id:s.id, platform:s.platform, lang:normLang(s.note),
     name:platform(s.platform).name + " · " + chanLabel(s),
     url:safeUrl(s.url), handle:s.handle || "",
-    ytChannelId:checks.ytIds[s.id] || undefined,
+    /* the pinned id wins; a run-resolved one is only there for a channel without one */
+    ytChannelId:s.ytChannelId || checks.ytIds[s.id] || undefined,
   }));
 }
 
