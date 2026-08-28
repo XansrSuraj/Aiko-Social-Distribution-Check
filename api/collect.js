@@ -204,94 +204,333 @@ function tgBotTarget(ch) {
 
 /* ═══════════════════ youtube ═══════════════════ */
 
-/* A handle (@SportsFC-vn) is not accepted by the feed endpoint — only the UC… id is. The id is
-   embedded in the channel page as "externalId", so one extra fetch resolves it. That page is
-   ~1 MB, so the resolved id is handed back to the caller to cache against the channel. */
-async function ytResolve(handle) {
-  const r = await get("https://www.youtube.com/@" + encodeURIComponent(handle.replace(/^@/, "")));
-  const m = r.body.match(/"externalId"\s*:\s*"(UC[\w-]{20,})"/) ||
-            r.body.match(/channel_id=(UC[\w-]{20,})/);
-  if (!m) throw new Error("Could not find the channel id on that YouTube page");
-  return m[1];
+/* The public RSS feed (youtube.com/feeds/videos.xml) was this channel's reader until it began
+   answering 404 for EVERY channel id — MrBeast and Google Developers as readily as ours, from a
+   home connection as readily as from Vercel. That rules out the soft rate-limit this code used to
+   blame and retry around: the endpoint is simply gone. The retry loop it had is gone with it,
+   because six fetches that cannot succeed are worse than one honest failure.
+
+   YouTube is now read two independent ways, in order:
+
+     1. the official Data API v3, whenever YOUTUBE_API_KEY is set. Versioned, documented, and
+        deprecated in public rather than overnight — which is the actual answer to "make sure this
+        does not happen again". Three quota units per channel per run against a free 10,000/day
+        ceiling, so a daily check cannot outgrow it.
+     2. the channel page plus InnerTube — the same JSON endpoint youtube.com's own front end calls
+        to render a video. No key, no login, works right now with nothing configured.
+
+   Reader 2 is kept even when a key is present, so an expired or over-quota key is a note in the
+   report rather than an outage. Both carry an exact ISO timestamp and a duration, so unlike RSS
+   they can tell a Short from long-form instead of lumping the two together. */
+
+const YT_ROUND = 6;    /* metadata lookups per round — one round covers a normal day */
+const YT_MAX   = 30;   /* hard ceiling per channel, so a busy channel cannot stall the run */
+
+function ytText(o) {
+  if (!o) return "";
+  if (typeof o === "string") return o;
+  if (o.simpleText) return o.simpleText;
+  if (Array.isArray(o.runs)) return o.runs.map(r => r.text || "").join("");
+  return "";
 }
 
-function ytParse(xml) {
-  const out = [];
-  const entries = xml.split("<entry>").slice(1);
-  for (const e of entries) {
-    const vid = (e.match(/<yt:videoId>([^<]+)</) || [])[1];
-    const pub = (e.match(/<published>([^<]+)</) || [])[1];
-    if (!vid || !pub) continue;
-    const title = decodeXml((e.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || "");
-    /* media:description carries the full description; the title alone is often just a name and
-       too short to tell one language from another. These channels repeat the title inside the
-       description, so joining both blindly prints it twice in the report. */
-    const desc = decodeXml((e.match(/<media:description>([\s\S]*?)<\/media:description>/) || [])[1] || "");
-    const text = !desc ? title
-               : !title ? desc
-               : desc.indexOf(title.trim()) !== -1 ? desc
-               : title + "\n" + desc;
+/* Title and description say the same thing on these channels often enough that joining them
+   blindly prints the title twice in the report. */
+function ytJoin(title, desc) {
+  const t = String(title || ""), d = String(desc || "");
+  if (!d) return t;
+  if (!t) return d;
+  return d.indexOf(t.trim()) !== -1 ? d : t + "\n" + d;
+}
 
-    /* The alternate link is /shorts/<id> for a Short and /watch?v=<id> for anything else, which
-       is the one place the feed distinguishes them — the fields themselves never say. */
-    const href = (e.match(/<link[^>]+href="([^"]+)"/) || [])[1] || "";
-    const isShort = /\/shorts\//.test(href);
+/* "PT1M30S" -> 90. Used only to tell Shorts from long-form. */
+function ytIsoDur(s) {
+  const m = /^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?$/.exec(String(s || ""));
+  if (!m) return 0;
+  return (+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + Math.round(+m[4] || 0);
+}
 
-    out.push({
-      externalId: vid,
-      ts: pub,
-      kind: isShort ? "short" : "video",
-      title,
-      text: text.trim(),
-      views: num((e.match(/media:statistics[^>]*views="(\d+)"/) || [])[1]),
-      likes: num((e.match(/media:starRating[^>]*count="(\d+)"/) || [])[1]),
-      thumb: (e.match(/media:thumbnail[^>]*url="([^"]+)"/) || [])[1] || "",
-      updated: (e.match(/<updated>([^<]+)</) || [])[1] || "",
-      permalink: href || "https://www.youtube.com/watch?v=" + vid,
-    });
+/* A Short is a vertical video of three minutes or less, and neither reader states it outright.
+   The channel grid is the honest signal — it links a Short as /shorts/<id> — so duration is only
+   consulted when the grid had nothing to say about that video. */
+const YT_SHORT_MAX = 180;
+function ytKind(isShort, secs) {
+  if (isShort) return "short";
+  return secs > 0 && secs <= YT_SHORT_MAX ? "short" : "video";
+}
+
+function ytLink(vid, kind) {
+  return "https://www.youtube.com/" + (kind === "short" ? "shorts/" : "watch?v=") + vid;
+}
+
+/* ── reader 1: the official Data API ── */
+
+async function ytApi(resource, query) {
+  const r = await get("https://www.googleapis.com/youtube/v3/" + resource + "?" + query +
+                      "&key=" + encodeURIComponent(process.env.YOUTUBE_API_KEY));
+  let j = null;
+  try { j = JSON.parse(r.body); } catch (e) { /* the status check below reports it */ }
+  if (r.status !== 200) {
+    const e = (j && j.error) || {};
+    const reason = (e.errors && e.errors[0] && e.errors[0].reason) || "";
+    /* worth telling apart in the report: an exhausted daily quota fixes itself at midnight
+       Pacific, a rejected key never does */
+    const quota = /quota/i.test(reason) || /quota/i.test(e.message || "");
+    throw new Error("YouTube Data API " + (quota ? "daily quota is used up" : "refused the key") +
+                    " (" + (e.message || "HTTP " + r.status) + ")");
   }
-  return out;
+  return j || {};
 }
 
-async function collectYouTube(ch) {
+async function collectYouTubeApi(ch, cutoff) {
   const t = ytTarget(ch);
   let id = t.id, resolved = null;
   if (!id) {
     if (!t.handle) throw new Error("No YouTube handle or channel id could be read from this channel");
-    id = await ytResolve(t.handle);
+    const j = await ytApi("channels", "part=id&forHandle=" +
+                          encodeURIComponent("@" + t.handle.replace(/^@/, "")));
+    id = j.items && j.items[0] && j.items[0].id;
+    if (!id) throw new Error("YouTube Data API does not know the handle @" + t.handle.replace(/^@/, ""));
     resolved = { ytChannelId: id };
   }
-  /* 404 is retried here, unlike everywhere else, because YouTube's feed does not use it to mean
-     "no such channel". Under load it serves Google's generic 404 page — byte-for-byte the same
-     1613 bytes for a real channel id as for one invented at random — so the status carries no
-     information about existence and may well clear on a second ask. */
-  /* YouTube serves this feed intermittently from a datacenter IP — the SAME valid channel id comes
-     back 200, then 404, then 500, seemingly at random (a soft rate-limit, not a real "no such
-     channel"). Observed ~50% success per fetch, so several rounds catch a good one where a single
-     ask would have wrongly reported the channel dead. Each get() already tries twice; three rounds
-     with backoff make a persistent false 404 very unlikely. */
-  const YT_RETRY = [404, 429, 500, 502, 503, 504, 522, 524];
-  let r;
-  for (let i = 0; i < 3; i++) {
-    r = await get("https://www.youtube.com/feeds/videos.xml?channel_id=" + id, null, [404]);
-    if (YT_RETRY.indexOf(r.status) === -1) break;   // a 200, or a real answer like 403 → stop asking
-    if (i < 2) await new Promise(res => setTimeout(res, 900 * (i + 1)));
+
+  /* Every channel's uploads playlist is its own id with the second letter changed, UC… -> UU… —
+     a documented equivalence, so this needs no extra channels.list round trip. Shorts land in
+     that playlist alongside long-form. */
+  const pl = await ytApi("playlistItems",
+                         "part=snippet,contentDetails&maxResults=50&playlistId=UU" + id.slice(2));
+  const items = (pl.items || []).filter(it => {
+    const ts = it.contentDetails && it.contentDetails.videoPublishedAt;
+    return ts && (!cutoff || new Date(ts).getTime() >= cutoff);
+  });
+
+  /* one more call covers durations and counters for the whole window at once */
+  const ids = items.map(it => it.contentDetails.videoId).filter(Boolean).slice(0, 50);
+  const extra = {};
+  if (ids.length) {
+    const v = await ytApi("videos", "part=contentDetails,statistics&id=" + ids.join(","));
+    for (const it of (v.items || [])) extra[it.id] = it;
   }
-  if (r.status !== 200) {
-    /* Resolution reached a live channel page, so the channel is certainly there; whatever the
-       feed is doing, this is not an empty channel and must not be read as one. */
-    const known = resolved ? " The channel page loaded fine, so it exists — treat this as unknown, not empty."
-                           : " Treat this as unknown, not empty.";
-    throw new Error(`YouTube would not serve the feed (HTTP ${r.status}).` + known);
-  }
-  const posts = ytParse(r.body);
-  if (!posts.length && !/<feed/i.test(r.body)) throw new Error("YouTube feed was not readable");
+
+  const posts = items.map(it => {
+    const vid = it.contentDetails.videoId, sn = it.snippet || {}, ex = extra[vid] || {};
+    const kind = ytKind(false, ytIsoDur(ex.contentDetails && ex.contentDetails.duration));
+    const th = sn.thumbnails || {};
+    return {
+      externalId: vid,
+      ts: new Date(it.contentDetails.videoPublishedAt).toISOString(),
+      kind,
+      title: sn.title || "",
+      text: ytJoin(sn.title, sn.description).trim(),
+      views: num(ex.statistics && ex.statistics.viewCount),
+      likes: num(ex.statistics && ex.statistics.likeCount),
+      thumb: (th.maxres || th.standard || th.high || th.medium || th.default || {}).url || "",
+      updated: "",
+      permalink: ytLink(vid, kind),
+    };
+  });
+
   return {
-    posts, resolved,
-    /* Shorts are not flagged anywhere in the feed and a duration lookup needs an API key,
-       so long-form and Shorts are deliberately counted together rather than guessed at. */
-    note: "Shorts and long-form are counted together — the feed does not distinguish them",
+    posts, resolved, source: "youtube-api",
+    note: "Read through the official YouTube Data API. Shorts are told apart by duration " +
+          "(three minutes or less), which the API does not state outright.",
   };
+}
+
+/* ── reader 2: the channel page and InnerTube, no key ── */
+
+async function ytPage(path) {
+  const r = await get("https://www.youtube.com" + path);
+  if (r.status !== 200) {
+    const e = new Error("YouTube would not serve " + path + " (HTTP " + r.status +
+                        ") — treat this channel as unknown, not empty");
+    e.status = r.status;
+    throw e;
+  }
+  return r.body;
+}
+
+function ytInitialData(html) {
+  const m = html.match(/ytInitialData\s*=\s*(\{.+?\})\s*;\s*<\/script>/s) ||
+            html.match(/ytInitialData"\]\s*=\s*(\{.+?\})\s*;/s);
+  if (!m) return null;
+  try { return JSON.parse(m[1]); } catch (e) { return null; }
+}
+
+/* Walks the rendered grid for video ids in the order YouTube laid them out — newest first, but
+   for a pinned video, which can sit out of order at the top. Which ids are Shorts is read off the
+   raw page text instead, because the /shorts/<id> link sits a level above the id in the tree and
+   a plain walk would lose the pairing. */
+function ytHarvest(json, raw) {
+  const ids = [], seen = new Set(), shorts = new Set();
+  const re = /"\/shorts\/([\w-]{11})"/g;
+  let m;
+  while ((m = re.exec(raw))) shorts.add(m[1]);
+  (function walk(o) {
+    if (!o || typeof o !== "object") return;
+    if (Array.isArray(o)) { for (const v of o) walk(v); return; }
+    const vid = o.videoId;
+    if (typeof vid === "string" && /^[\w-]{11}$/.test(vid) && !seen.has(vid)) {
+      seen.add(vid); ids.push(vid);
+    }
+    for (const k in o) walk(o[k]);
+  })(json);
+  return { ids, shorts };
+}
+
+/* the public web-client credentials youtube.com ships in every page it serves */
+function ytCreds(html) {
+  return {
+    key: (html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1] || "",
+    ver: (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20240101.00.00",
+  };
+}
+
+/* get() is GET-only and InnerTube wants a POST, so this carries its own timeout. A video that
+   will not answer comes back null and is skipped — one unreadable video must not cost the other
+   nine — and the caller refuses to report the channel at all if none of them answered. */
+async function ytPlayer(vid, creds) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT);
+  try {
+    const r = await fetch("https://www.youtube.com/youtubei/v1/player?key=" +
+                          encodeURIComponent(creds.key), {
+      method: "POST", signal: ctl.signal,
+      headers: { "Content-Type": "application/json", "User-Agent": UA,
+                 "Accept-Language": "en-US,en;q=0.9" },
+      body: JSON.stringify({
+        videoId: vid,
+        context: { client: { clientName: "WEB", clientVersion: creds.ver, hl: "en" } },
+      }),
+    });
+    if (r.status !== 200) return null;
+    return await r.json();
+  } catch (e) {
+    return null;
+  } finally { clearTimeout(timer); }
+}
+
+function ytPost(vid, j, isShort) {
+  const mf = (j && j.microformat && j.microformat.playerMicroformatRenderer) || null;
+  const vd = (j && j.videoDetails) || null;
+  /* uploadDate carries the offset and publishDate is the same instant; without either the video
+     cannot be placed on the timeline, so it counts as unread rather than as undated */
+  const when = mf && (mf.uploadDate || mf.publishDate);
+  if (!when) return null;
+  const at = new Date(when);
+  if (isNaN(at.getTime())) return null;
+  const title = (vd && vd.title) || ytText(mf && mf.title);
+  const desc = (vd && vd.shortDescription) || ytText(mf && mf.description);
+  const kind = ytKind(isShort, Number(vd && vd.lengthSeconds) || 0);
+  const thumbs = (vd && vd.thumbnail && vd.thumbnail.thumbnails) || [];
+  return {
+    externalId: vid,
+    ts: at.toISOString(),
+    kind,
+    title,
+    text: ytJoin(title, desc).trim(),
+    views: num(vd && vd.viewCount),
+    likes: null,        /* the player response carries none, and a written-in 0 would read as real */
+    thumb: (thumbs.length && thumbs[thumbs.length - 1].url) || "",
+    updated: "",
+    permalink: ytLink(vid, kind),
+    channelId: (vd && vd.channelId) || "",
+  };
+}
+
+async function collectYouTubeWeb(ch, cutoff) {
+  const t = ytTarget(ch);
+  const base = t.id ? "/channel/" + t.id
+             : t.handle ? "/@" + encodeURIComponent(t.handle.replace(/^@/, "")) : "";
+  if (!base) throw new Error("No YouTube handle or channel id could be read from this channel");
+
+  /* Videos and Shorts are separate grids on a channel that posts both, so reading only one would
+     call a day with three Shorts and no long-form an empty day. Fetched together, so the pair
+     costs about what one costs; a channel with no Shorts tab simply fails that half. */
+  const [vTab, sTab] = await Promise.all([
+    ytPage(base + "/videos").catch(e => e),
+    ytPage(base + "/shorts").catch(e => e),
+  ]);
+  const pages = [vTab, sTab].filter(p => typeof p === "string");
+  if (!pages.length) throw new Error(String(vTab.message || vTab));
+
+  const found = pages[0].match(/"externalId"\s*:\s*"(UC[\w-]{20,})"/);
+  const id = t.id || (found && found[1]) || "";
+  const resolved = !t.id && found ? { ytChannelId: found[1] } : null;
+
+  const creds = ytCreds(pages[0]);
+  if (!creds.key) {
+    throw new Error("YouTube's channel page carried no InnerTube key — treat this channel as " +
+                    "unknown, not empty");
+  }
+
+  const lists = [], shorts = new Set();
+  for (const html of pages) {
+    const data = ytInitialData(html);
+    if (!data) continue;
+    const h = ytHarvest(data, html);
+    if (h.ids.length) lists.push(h.ids);
+    for (const s of h.shorts) shorts.add(s);
+  }
+  /* interleaved, so one round of lookups covers the newest of both tabs rather than draining one */
+  const order = [], queued = new Set();
+  for (let i = 0; i < YT_MAX; i++) for (const l of lists) {
+    if (l[i] && !queued.has(l[i])) { queued.add(l[i]); order.push(l[i]); }
+  }
+  if (!order.length) {
+    throw new Error("Could not read a single video off YouTube's channel page — treat this " +
+                    "channel as unknown, not empty");
+  }
+
+  const posts = [];
+  let read = 0, looked = 0;
+  for (let i = 0; i < order.length && looked < YT_MAX; i += YT_ROUND) {
+    const batch = order.slice(i, i + YT_ROUND);
+    looked += batch.length;
+    const got = await Promise.all(
+      batch.map(v => ytPlayer(v, creds).then(j => ytPost(v, j, shorts.has(v)))));
+    let fresh = 0;
+    for (const p of got) {
+      if (!p) continue;
+      read++;
+      const owner = p.channelId; delete p.channelId;
+      /* the page's JSON also names videos this channel did not post — a trailer, a shelf of
+         recommendations — and one of those inside the window would otherwise be credited here */
+      if (id && owner && owner !== id) continue;
+      posts.push(p);
+      if (!cutoff || new Date(p.ts).getTime() >= cutoff) fresh++;
+    }
+    /* The grid runs newest first, so a whole round landing outside the window means everything
+       after it is older still. A round rather than a single video, because one pinned video at
+       the top is old by design and must not cut the read short. */
+    if (!fresh && posts.length) break;
+  }
+  if (!read) {
+    throw new Error("YouTube would not describe any of this channel's videos — treat this " +
+                    "channel as unknown, not empty");
+  }
+
+  return {
+    posts, resolved, source: "youtube-web",
+    note: "Read from the channel page directly — no API key is set. Setting YOUTUBE_API_KEY " +
+          "switches this to the official API, which is the sturdier of the two.",
+  };
+}
+
+/* The API first when there is a key, the page read as the safety net either way. */
+async function collectYouTube(ch, cutoff) {
+  let apiFailed = "";
+  if (process.env.YOUTUBE_API_KEY) {
+    try { return await collectYouTubeApi(ch, cutoff); }
+    catch (err) { apiFailed = String(err.message || err); }
+  }
+  try {
+    const out = await collectYouTubeWeb(ch, cutoff);
+    if (apiFailed) out.note = apiFailed + " — read from the channel page instead.";
+    return out;
+  } catch (err) {
+    throw new Error(apiFailed ? apiFailed + " | " + (err.message || err) : String(err.message || err));
+  }
 }
 
 /* ═══════════════════ x (twitter) ═══════════════════ */
@@ -919,11 +1158,13 @@ async function collectOne(ch, cutoff) {
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
-  const source = { youtube: "youtube-rss", telegram: "telegram-web",
+  const source = { youtube: "youtube-web", telegram: "telegram-web",
                    instagram: "instagram-public", x: "x-web", facebook: "facebook-apify",
                    tiktok: "tiktok-apify", tgbot: "telegram-mtproto", viber: "ingest" }[ch.platform];
   try {
-    const out = await fn(ch);
+    /* the window is handed to the collector so it can stop reading once it is past it —
+       YouTube pages its metadata lookups and would otherwise walk the whole grid every run */
+    const out = await fn(ch, cutoff);
     const posts = out.posts
       .filter(p => !cutoff || new Date(p.ts).getTime() >= cutoff)
       .sort((a, b) => new Date(b.ts) - new Date(a.ts));

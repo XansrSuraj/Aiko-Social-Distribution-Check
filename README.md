@@ -181,7 +181,7 @@ Four things get flagged:
 
 | Platform | How | Needs |
 |---|---|---|
-| YouTube | the public RSS feed | nothing |
+| YouTube | the official Data API, or the channel page if no key is set | nothing (a free `YOUTUBE_API_KEY` is sturdier) |
 | Telegram | `t.me/s/<channel>`, the public preview | nothing |
 | X (Twitter) | the profile page's own schema.org microdata | nothing |
 | Instagram | the extension, using your logged-in session | Chrome + you signed in |
