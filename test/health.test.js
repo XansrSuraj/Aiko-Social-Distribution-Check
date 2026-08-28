@@ -72,6 +72,19 @@ const check = (good, label, extra) => {
   check(vn && vn.count === 0, "the vn community is still empty — counts do not bleed across");
   check(r.body.ageSeconds !== null && r.body.ageSeconds < 5, "and lastSeen refreshed on the post");
 
+  console.log("\n── the readers block says which credentials are present, and never their value");
+  delete process.env.YOUTUBE_API_KEY;
+  r = await getHealth();
+  check(/NO KEY/.test(r.body.readers.youtube),
+    "a missing YouTube key is called out — on this host it ends the read, not degrades it",
+    r.body.readers.youtube);
+  process.env.YOUTUBE_API_KEY = "super-secret-value";
+  r = await getHealth();
+  check(r.body.readers.youtube === "key set", "and a present one just says so", r.body.readers.youtube);
+  check(JSON.stringify(r.body).indexOf("super-secret-value") === -1,
+    "the key itself never appears in a response this endpoint serves without auth");
+  delete process.env.YOUTUBE_API_KEY;
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   try { BACKUP === null ? fs.unlinkSync(STORE_FILE) : fs.writeFileSync(STORE_FILE, BACKUP, "utf8"); }
   catch (e) {}

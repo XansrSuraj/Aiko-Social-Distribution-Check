@@ -72,5 +72,19 @@ module.exports = async (req, res) => {
     /* the heartbeat log — the dashboard uses it to tell a real Viber miss (phone was online then)
        from an unverifiable one (phone was offline then) */
     beats,
+    /* Which server-side readers currently have what they need. Presence only, never the value, so
+       this stays safe to poll without auth.
+
+       YouTube is the one worth watching. Its keyless path works from a desk and is refused from a
+       datacenter — Google gates the IP — so on this host a missing key does not degrade the read,
+       it ends it. That failure is loud in the report either way, but seeing it here means noticing
+       before the next daily check rather than during it. */
+    readers: {
+      youtube: process.env.YOUTUBE_API_KEY ? "key set" : "NO KEY — unreadable from this host",
+      x: process.env.TWITTERAPI_KEY ? "key set" : "no key",
+      apify: process.env.APIFY_TOKEN ? "token set" : "no token",
+      telegramBot: process.env.TG_API_ID && process.env.TG_API_HASH && process.env.TG_SESSION
+        ? "session set" : "no session",
+    },
   });
 };
