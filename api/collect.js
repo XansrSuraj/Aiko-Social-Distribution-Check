@@ -401,20 +401,39 @@ function ytCreds(html) {
    read. `why` records which route answered, so the report can say so and the next person does
    not have to rediscover any of this. */
 
-const YT_INNERTUBE_HOSTS = ["https://www.youtube.com", "https://youtubei.googleapis.com"];
+/* Asked as a browser from a datacenter, InnerTube answers LOGIN_REQUIRED — Google's "confirm
+   you're not a bot" gate, which is applied to the IP rather than to the request, so no amount of
+   header dressing talks it round. What the gate does not cover uniformly is every client: the
+   embedded player and the TV and phone apps sign in differently and are refused less often. So
+   the same question is asked as several clients before the watch page is tried.
 
-async function ytInnertube(host, vid, creds) {
+   None of this is load-bearing if YOUTUBE_API_KEY is set, and that is the point — these are the
+   attempts that keep a keyless deployment working, not the ones the report should depend on. */
+const YT_CLIENTS = [
+  { host: "https://www.youtube.com",           name: "WEB",   id: 1,  ver: null },
+  { host: "https://youtubei.googleapis.com",   name: "WEB",   id: 1,  ver: null },
+  { host: "https://youtubei.googleapis.com",   name: "MWEB",  id: 2,  ver: "2.20240101.00.00" },
+  { host: "https://youtubei.googleapis.com",   name: "WEB_EMBEDDED_PLAYER", id: 56,
+    ver: "1.20240101.00.00" },
+  { host: "https://youtubei.googleapis.com",   name: "TVHTML5_SIMPLY_EMBEDDED_PLAYER", id: 85,
+    ver: "2.0" },
+];
+
+async function ytInnertube(client, vid, creds) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT);
+  const ver = client.ver || creds.ver;
   try {
-    const r = await fetch(host + "/youtubei/v1/player?key=" + encodeURIComponent(creds.key), {
+    const r = await fetch(client.host + "/youtubei/v1/player?key=" + encodeURIComponent(creds.key), {
       method: "POST", signal: ctl.signal,
       headers: { "Content-Type": "application/json", "User-Agent": UA,
                  "Accept-Language": "en-US,en;q=0.9", "Origin": "https://www.youtube.com",
-                 "X-YouTube-Client-Name": "1", "X-YouTube-Client-Version": creds.ver },
+                 /* the consent interstitial otherwise stands in for the answer */
+                 "Cookie": "CONSENT=YES+cb; SOCS=CAI",
+                 "X-YouTube-Client-Name": String(client.id), "X-YouTube-Client-Version": ver },
       body: JSON.stringify({
         videoId: vid,
-        context: { client: { clientName: "WEB", clientVersion: creds.ver, hl: "en",
+        context: { client: { clientName: client.name, clientVersion: ver, hl: "en",
                              gl: "US", userAgent: UA } },
       }),
     });
@@ -435,7 +454,7 @@ async function ytInnertube(host, vid, creds) {
    this from becoming a second parser to maintain. */
 async function ytWatch(vid) {
   let r;
-  try { r = await get("https://www.youtube.com/watch?v=" + vid); }
+  try { r = await get("https://www.youtube.com/watch?v=" + vid, { Cookie: "CONSENT=YES+cb; SOCS=CAI" }); }
   catch (e) { return { fail: String((e && e.message) || e).slice(0, 60) }; }
   if (r.status !== 200) return { fail: "watch HTTP " + r.status };
   const m = r.body.match(/ytInitialPlayerResponse\s*=\s*(\{.+?\})\s*;\s*(?:<\/script>|var )/s);
@@ -472,10 +491,21 @@ async function ytWatch(vid) {
    none of them answered. */
 async function ytMeta(vid, creds, why) {
   const tried = [];
-  for (const host of YT_INNERTUBE_HOSTS) {
-    const out = await ytInnertube(host, vid, creds);
-    if (out.j) { why.route = why.route || new URL(host).hostname; return out.j; }
-    tried.push(new URL(host).hostname + ": " + out.fail);
+  const label = c => new URL(c.host).hostname.replace("www.youtube.com", "youtube") +
+                     "/" + c.name;
+  /* Once one client has answered, the rest of this channel's videos go straight to it — the
+     others were refused for the deployment, not for the video, so re-asking them per video would
+     multiply every read by five for nothing. */
+  const order = why.client ? [why.client].concat(YT_CLIENTS.filter(c => c !== why.client))
+                           : YT_CLIENTS;
+  for (const client of order) {
+    const out = await ytInnertube(client, vid, creds);
+    if (out.j) {
+      why.client = client;
+      why.route = why.route || label(client);
+      return out.j;
+    }
+    tried.push(label(client) + ": " + out.fail);
   }
   const w = await ytWatch(vid);
   if (w.j) { why.route = why.route || "watch page"; return w.j; }
