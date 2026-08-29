@@ -1183,8 +1183,17 @@ function capWords(s){
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .split(/\s+/).filter(w => w.length >= 2);
 }
+/* Facebook cuts a long caption at a fixed length before appending its "See more", and the cut
+   lands mid-word about as often as not — "khoảnh" arrives as "kho". That fragment is not a word
+   anybody wrote. It cost nothing while a caption only had to clear 60%, but now that every word
+   has to match it would cross out captions that genuinely did go out, so a caption showing the
+   truncation marker gives up its final token before being compared. */
+const CLIPPED = /(…|\.\.\.)\s*(see more|xem thêm|more)?\s*$/i;
+
 function captionOverlap(dropText, channelCaption){
-  const A = [...new Set(capWords(dropText))], B = [...new Set(capWords(channelCaption))];
+  let capw = capWords(channelCaption);
+  if(CLIPPED.test(String(channelCaption || "")) && capw.length) capw = capw.slice(0, -1);
+  const A = [...new Set(capWords(dropText))], B = [...new Set(capw)];
   /* Compare against the SHORTER caption's words (containment), because Facebook clips long captions
      with a "see more" — the truncated text is a subset of the full one, and a subset should still
      read as the same post. A genuinely different post shares only a few words either way. */
@@ -1194,8 +1203,23 @@ function captionOverlap(dropText, channelCaption){
   return { ratio: matched.length / small.length, matched: matched.length, total: small.length,
            missing: small.filter(w => !bigSet.has(w)) };
 }
-/* the drop is credited to the channel only when most of its words are present */
-const CAPTION_MATCH = 0.6;
+
+/* A tick here means "this reel went out on this channel". It used to mean "60% of its words turned
+   up in some caption", which is a different claim, and the gap between the two is where a post
+   that never went out on sportsfc.vn came back delivered.
+
+   So the bar is now every word. A drop is credited only when the shorter of the two texts is
+   wholly contained in the longer — nothing left over, nothing unaccounted for. Anything short of
+   that is a cross.
+
+   This deliberately trades a false tick for a false cross, on the user's instruction and for a
+   good reason: a cross is visible and gets checked, while a tick is never looked at again. The
+   report must never claim delivery it cannot prove.
+
+   CAPTION_NEAR no longer decides anything. It only marks a cross as CLOSE — most of the words
+   matched, so it is probably the same post reworded and worth a human minute — which keeps the
+   information the old threshold carried without letting it grant a tick. */
+const CAPTION_NEAR = 0.6;
 
 /* The one thing that separates two otherwise-identical templated posts is the fixture they name —
    its DATE. SportsFC captions carry it as "📅 28 August 2026" (and a kick-off time). Two posts a day
@@ -1523,7 +1547,9 @@ function reconcile(channels, opt){
         bag.forEach((cap, j) => {
           if(differentFixture(ref, cap.text)) return;     // same template, different day → not this drop
           const ov = captionOverlap(ref, cap.text);
-          if(ov.ratio >= CAPTION_MATCH) pairs.push({ i, j, ov });
+          /* Every word, or no tick. One word unaccounted for is enough to withhold the claim that
+             this reel went out — see CAPTION_NEAR above for why a cross is the safer error. */
+          if(ov.total >= 3 && !ov.missing.length) pairs.push({ i, j, ov });
         });
       });
       pairs.sort((a, b) => b.ov.ratio - a.ov.ratio);
@@ -1541,7 +1567,7 @@ function reconcile(channels, opt){
                          post:Object.assign({ ts:null }, hit.cap) };
         /* the closest SAME-fixture caption came, so a miss carries its own evidence — a caption from
            another day is not "close", it is a different post, so it does not count as the near-miss */
-        let best = { ratio:0, matched:0, total:0 };
+        let best = { ratio:0, matched:0, total:0, missing:[] };
         for(const cap of bag){
           if(differentFixture(ref, cap.text)) continue;
           const ov = captionOverlap(ref, cap.text); if(ov.ratio > best.ratio) best = ov;
@@ -1660,16 +1686,18 @@ function reconcile(channels, opt){
     if(mode === "content"){
       cells.forEach((x, i) => {
         const m = x.match;
-        if(x.state !== "okc" || !m || !m.missing || !m.missing.length) return;
+        if(x.state !== "miss" || !m || !m.total || !m.missing || !m.missing.length) return;
+        if(m.ratio < CAPTION_NEAR) return;    // a distant miss is just a miss; the missing alert has it
         /* capped so one long caption cannot bury the rest of the report, but the count is always
            exact — the cap only limits how many are spelled out */
         const shown = m.missing.slice(0, 15);
         alerts.push({ kind:"verify", id:c.id, name:c.name,
-          text:`${slots[i] ? "the " + slots[i].time + " drop" : "a drop"} was counted as delivered ` +
-               `on only ${m.matched} of ${m.total} words — ${m.missing.length} ` +
-               `word${m.missing.length === 1 ? " does" : "s do"} NOT match: ${shown.join(", ")}` +
+          text:`${slots[i] ? "the " + slots[i].time + " drop" : "a drop"} is CROSSED — only ` +
+               `${m.matched} of ${m.total} words match, ${m.missing.length} ` +
+               `do${m.missing.length === 1 ? "es" : ""} NOT: ${shown.join(", ")}` +
                (m.missing.length > shown.length ? ` (+${m.missing.length - shown.length} more)` : "") +
-               ` · please verify this one by hand before trusting the ✓` });
+               ` · close, so it may be the same post reworded — check by hand and, if it did go ` +
+               `out, this is the wording to fix` });
       });
     }
 
@@ -2287,13 +2315,13 @@ function dailyCheckModal(o){
             const tip = c.state === "lang" && c.detected
               ? `caption looks ${c.detected.lang.toUpperCase()} — ${c.detected.why}`
               : c.state === "okc" ? (c.match && c.match.total
-                  ? (c.match.missing && c.match.missing.length
-                      /* an imperfect match is an estimate, and the tooltip must not call it a fact */
-                      ? `caption match: ${c.match.matched}/${c.match.total} words — ${c.match.missing.length} do NOT match (${c.match.missing.slice(0, 8).join(", ")}) — VERIFY BY HAND`
-                      : `caption match: all ${c.match.total} words — the same reel went out`)
+                  /* okc is only ever awarded on a whole-caption match now, so it can say so plainly */
+                  ? `caption match: all ${c.match.total} words — the same reel went out`
                   : `${Math.round(c.score * 100)}% caption match — ${d.t}`)
               : c.state === "miss" && c.match && c.match.total
-                ? `reel did NOT go out — closest caption matched only ${c.match.matched}/${c.match.total} words`
+                ? `reel did NOT go out — closest caption matched ${c.match.matched}/${c.match.total} words` +
+                  (c.match.missing && c.match.missing.length
+                    ? ` · ${c.match.missing.length} do NOT match: ${c.match.missing.slice(0, 10).join(", ")}` : "")
               : c.state === "miss" && c.score != null
                 ? `best caption match was only ${Math.round(c.score * 100)}%`
               : c.lateBy ? `posted, but ${fmtGap(c.lateBy)} behind the rest of this drop`
@@ -2522,11 +2550,13 @@ function dailyCheckModal(o){
         ${meta.note ? `<div class="mt" style="margin-top:5px">${esc(meta.note)}</div>` : ""}
         ${r.mode === "content" ? r.cells.map((x, i) => x.state === "miss" && rep.slots[i]
           ? `<div class="dc-miss">reel did NOT go out for the ${esc(rep.slots[i].time)} drop —
-               closest caption matched only ${x.match ? x.match.matched + "/" + x.match.total : Math.round((x.score || 0) * 100) + "%"} words</div>`
+               closest caption matched ${x.match ? x.match.matched + "/" + x.match.total : Math.round((x.score || 0) * 100) + "%"} words${
+               x.match && x.match.missing && x.match.missing.length
+                 ? " · " + x.match.missing.length + " do NOT match: " + esc(x.match.missing.slice(0, 15).join(", ")) +
+                   (x.match.missing.length > 15 ? " (+" + (x.match.missing.length - 15) + " more)" : "")
+                 : ""}</div>`
           : (x.state === "okc" && rep.slots[i] && x.match
-             ? (x.match.missing && x.match.missing.length
-                 ? `<div class="mt" style="margin-top:4px;color:var(--amb)">⚠ ${esc(rep.slots[i].time)} drop — counted as sent on only ${x.match.matched}/${x.match.total} words · ${x.match.missing.length} do NOT match: ${esc(x.match.missing.slice(0, 15).join(", "))}${x.match.missing.length > 15 ? " (+" + (x.match.missing.length - 15) + " more)" : ""} · verify by hand</div>`
-                 : `<div class="mt" style="margin-top:4px;color:var(--grn)">✓ ${esc(rep.slots[i].time)} drop — caption matched all ${x.match.total} words</div>`) : "")).join("") : ""}
+             ? `<div class="mt" style="margin-top:4px;color:var(--grn)">✓ ${esc(rep.slots[i].time)} drop — caption matched all ${x.match.total} words</div>` : "")).join("") : ""}
         ${mine.length ? `<div class="dc-plist">${mine.map(p => {
           const d = detectLang(p.text), bad = r.lang && d.lang && d.lang !== r.lang;
           const t = clean(p.text);
@@ -2742,10 +2772,10 @@ function dailyCheckModal(o){
               r.cells.map((x, i) => ` · ${rep.slots[i] ? rep.slots[i].time : i}:` +
                 (x.match && x.match.total
                   ? (x.state === "okc"
-                      ? `${x.match.matched}/${x.match.total} words` +
+                      ? `all ${x.match.total} words ✓`
+                      : `${x.match.matched}/${x.match.total} words — NOT sent` +
                         (x.match.missing && x.match.missing.length
-                          ? ` ⚠ VERIFY (${x.match.missing.length} unmatched: ${x.match.missing.slice(0, 15).join(", ")})` : ` ✓`)
-                      : `only ${x.match.matched}/${x.match.total} words — NOT sent`)
+                          ? ` (${x.match.missing.length} unmatched: ${x.match.missing.slice(0, 15).join(", ")})` : ""))
                   : x.state)).join(""));
           if(meta.routeLog && r.mode !== "timeline")
             for(const x of meta.routeLog)

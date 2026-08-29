@@ -348,22 +348,32 @@ ok(cr.alerts.length === 0, "so nothing is reported missing",
      the old code called it delivered and moved on */
   const NEARLY = VN_A.replace("bất tử", "để đời").replace("chưa có hồi kết", "không dứt");
   let vr = contentRun({ fbv: [NEARLY, clip(VN_B, 55)], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });
-  const cell = crow(vr, "fbv").cells.find(x => x.state === "okc" && x.match &&
-                                               x.match.missing && x.match.missing.length);
-  ok(!!cell, "an imperfect caption is still credited — the threshold decides the verdict",
+  const cell = crow(vr, "fbv").cells.find(x => x.match && x.match.missing && x.match.missing.length);
+  ok(cell && cell.state === "miss",
+    "a caption missing even a few words is CROSSED, never ticked",
     JSON.stringify(crow(vr, "fbv").cells.map(x => [x.state, x.match && x.match.matched + "/" + x.match.total])));
+  ok(crow(vr, "fbv").count === 1 && crow(vr, "fbv").status === "short",
+    "so the channel is short a post rather than reading complete",
+    `${crow(vr, "fbv").count}/2 ${crow(vr, "fbv").status}`);
 
   const v = vr.alerts.filter(a => a.kind === "verify" && a.id === "fbv");
-  ok(v.length === 1, "but an imperfect match now raises exactly one verify alert",
+  ok(v.length === 1, "a near-miss raises exactly one verify alert",
     vr.alerts.map(a => a.kind).join(","));
-  ok(/\d+ of \d+ words/.test(v[0].text), "which states how many words actually matched", v[0].text);
-  ok(/do NOT match/i.test(v[0].text) && cell.match.missing.every(w => v[0].text.indexOf(w) !== -1),
+  ok(/CROSSED/.test(v[0].text) && /\d+ of \d+ words match/.test(v[0].text),
+    "which says it was crossed and how many words matched", v[0].text);
+  ok(/do NOT/i.test(v[0].text) && cell.match.missing.every(w => v[0].text.indexOf(w) !== -1),
     "and names every word that did not match", v[0].text);
-  ok(/verify this one by hand/i.test(v[0].text),
-    "and asks for a human, rather than letting the tick speak for itself");
+  ok(/check by hand/i.test(v[0].text),
+    "and asks for a human, since a near-miss may be the same post reworded");
   ok(vr.alerts[0].kind === "verify",
-    "it sorts above every other alert — it argues with a ✓ already on screen",
-    vr.alerts.map(a => a.kind).join(","));
+    "it sorts above every other alert", vr.alerts.map(a => a.kind).join(","));
+
+  /* a distant miss is an ordinary miss — the verify alert is for the close ones, or it stops
+     meaning "look at this specifically" */
+  const far = contentRun({ fbv: [clip(VN_A, 60), EN_B], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });
+  ok(far.alerts.filter(a => a.kind === "verify" && a.id === "fbv").length === 0,
+    "an unrelated caption is just a miss, not a near-miss worth flagging",
+    far.alerts.filter(a => a.id === "fbv").map(a => a.kind).join(","));
 
   /* the other half of the contract: a word-perfect match must stay silent, or the alert becomes
      noise and gets ignored — which would be worse than the bug it replaces */
