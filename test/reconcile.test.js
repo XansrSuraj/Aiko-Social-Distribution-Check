@@ -47,7 +47,7 @@ const boot = `
 `;
 const M = new Function("ST", boot + src +
   "\n;return { reconcile, detectLang, clusterSlots, mergeLate, sigScore, normLang, chanLabel," +
-  " contentScore, checks:()=>checks };")(ST);
+  " contentScore, capWords, captionOverlap, checks:()=>checks };")(ST);
 
 let pass = 0, fail = 0;
 const ok = (good, label, extra) => {
@@ -332,6 +332,58 @@ ok(crow(cr, "fbv").cells.every(x => x.state === "okc"),
   crow(cr, "fbv").cells.map(x => x.state).join(","));
 ok(cr.alerts.length === 0, "so nothing is reported missing",
   cr.alerts.map(a => a.name + ": " + a.text).join(" | "));
+
+/* ── a ✓ that is not word-perfect must say so ──────────────────────────────
+   The failure this guards against actually shipped. A caption is credited with a drop once 60% of
+   the drop's words appear in it, and below that bar the report was loud — but between 60% and 100%
+   it printed a clean tick and said nothing. So a Facebook post that never went out on sportsfc.vn
+   came back "delivered", while the same day's fans channel was caught by luck: its wording drifted
+   far enough to fall under the threshold.
+
+   The threshold still decides. Moving it would only trade silent false ticks for silent false
+   misses. What must never happen again is the SILENCE: one unmatched word has to raise an alert
+   that names the words and asks for a human to look. */
+{
+  /* a caption that says the same thing but not in the same words — comfortably over the bar, so
+     the old code called it delivered and moved on */
+  const NEARLY = VN_A.replace("bất tử", "để đời").replace("chưa có hồi kết", "không dứt");
+  let vr = contentRun({ fbv: [NEARLY, clip(VN_B, 55)], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });
+  const cell = crow(vr, "fbv").cells.find(x => x.state === "okc" && x.match &&
+                                               x.match.missing && x.match.missing.length);
+  ok(!!cell, "an imperfect caption is still credited — the threshold decides the verdict",
+    JSON.stringify(crow(vr, "fbv").cells.map(x => [x.state, x.match && x.match.matched + "/" + x.match.total])));
+
+  const v = vr.alerts.filter(a => a.kind === "verify" && a.id === "fbv");
+  ok(v.length === 1, "but an imperfect match now raises exactly one verify alert",
+    vr.alerts.map(a => a.kind).join(","));
+  ok(/\d+ of \d+ words/.test(v[0].text), "which states how many words actually matched", v[0].text);
+  ok(/do NOT match/i.test(v[0].text) && cell.match.missing.every(w => v[0].text.indexOf(w) !== -1),
+    "and names every word that did not match", v[0].text);
+  ok(/verify this one by hand/i.test(v[0].text),
+    "and asks for a human, rather than letting the tick speak for itself");
+  ok(vr.alerts[0].kind === "verify",
+    "it sorts above every other alert — it argues with a ✓ already on screen",
+    vr.alerts.map(a => a.kind).join(","));
+
+  /* the other half of the contract: a word-perfect match must stay silent, or the alert becomes
+     noise and gets ignored — which would be worse than the bug it replaces */
+  const clean2 = contentRun({ fbv: [VN_A, VN_B], fbe: [EN_A, EN_B] });
+  ok(clean2.alerts.filter(a => a.kind === "verify").length === 0,
+    "a word-perfect match raises nothing",
+    clean2.alerts.map(a => a.kind + ":" + a.text).join(" | "));
+
+  /* Facebook's own "see more" is chrome on a button, not words anybody wrote. capWords used to
+     leave it in while normText stripped it, so every truncated caption carried two words the drop
+     could not contain — which would have fired this alert on essentially every long post. */
+  ok(M.capWords("Xin chào các bạn… See more").indexOf("see") === -1 &&
+     M.capWords("Hello everyone... see more").indexOf("more") === -1,
+    "a truncation marker is not counted as an unmatched word",
+    JSON.stringify(M.capWords("Hello everyone... see more")));
+  const clipped = contentRun({ fbv: [clip(VN_A, 60), clip(VN_B, 55)], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });
+  ok(clipped.alerts.filter(a => a.kind === "verify").length === 0,
+    "so a caption Facebook truncated is still a clean match",
+    clipped.alerts.map(a => a.text).join(" | "));
+}
 
 /* one caption absent must still read as a gap — the whole point is catching that */
 cr = contentRun({ fbv: [clip(VN_A, 60)], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });

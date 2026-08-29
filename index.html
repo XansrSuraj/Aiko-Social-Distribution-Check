@@ -355,6 +355,10 @@ table.dc a svg{width:14px;height:14px;vertical-align:-2px}
   padding:1.5px 6px;border-radius:20px;flex:none;
   background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
 .dc-al.lang .dc-ak{background:color-mix(in srgb,var(--amb) 18%,transparent);color:var(--amb)}
+/* A caption match that is not word-perfect. Deliberately the loudest badge here: it is the only
+   alert that argues with a ✓ the report has already printed, and a quiet version of it is what
+   let a Facebook post that never went out read as delivered. */
+.dc-al.verify .dc-ak{background:color-mix(in srgb,var(--amb) 30%,transparent);color:var(--amb)}
 .dc-al.over .dc-ak{background:color-mix(in srgb,var(--a1) 16%,transparent);color:var(--a1)}
 /* "maybe" is a short count on a channel whose whole window could not be read — a question, not
    a finding, and it must not look like one */
@@ -1170,6 +1174,12 @@ function capWords(s){
   return String(s || "").toLowerCase()
     .replace(/https?:\/\/\S+/g, " ")
     .replace(/[#@][\wÀ-ỹ]+/g, " ")
+    /* Facebook clips a long caption and appends its own "see more" — that is chrome on a button,
+       not something anybody wrote. normText strips it for the trigram score and this did not, so
+       every truncated caption carried two words the drop could never contain. Harmless while the
+       only consumer was a 60% threshold; the moment one unmatched word raises an alert, it would
+       have fired on every long Facebook post and taught the reader to ignore the alert. */
+    .replace(/(…|\.\.\.)?\s*(see more|xem thêm|more)\s*$/i, " ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .split(/\s+/).filter(w => w.length >= 2);
 }
@@ -1635,6 +1645,34 @@ function reconcile(channels, opt){
         text:`no Viber post for the ${maybeAt.join(", ")} drop${maybeAt.length === 1 ? "" : "s"} ` +
              `while the phone was online — likely missing, worth a quick check` });
 
+    /* A caption match is a judgement, not a measurement. It credits the drop once enough of its
+       words turn up in the caption, and "enough" is CAPTION_MATCH — 60%. So a channel could be
+       handed a clean ✓ on a caption that differed in a third of its words, with nothing anywhere
+       saying so. That is exactly how a Facebook post that never went out came back delivered on
+       sportsfc.vn, while the same day's fans channel was caught only because its wording happened
+       to drift further below the bar.
+
+       The threshold still decides the verdict — moving it would turn silent false ticks into
+       silent false misses, which is the same disease. What changes is that nothing imperfect is
+       allowed to pass quietly: ONE missing word raises this, it sorts above everything else, and
+       it names the words that did not match so the reader can settle it by eye rather than trust
+       a percentage. A ✓ this alert sits under has not been verified, only estimated. */
+    if(mode === "content"){
+      cells.forEach((x, i) => {
+        const m = x.match;
+        if(x.state !== "okc" || !m || !m.missing || !m.missing.length) return;
+        /* capped so one long caption cannot bury the rest of the report, but the count is always
+           exact — the cap only limits how many are spelled out */
+        const shown = m.missing.slice(0, 15);
+        alerts.push({ kind:"verify", id:c.id, name:c.name,
+          text:`${slots[i] ? "the " + slots[i].time + " drop" : "a drop"} was counted as delivered ` +
+               `on only ${m.matched} of ${m.total} words — ${m.missing.length} ` +
+               `word${m.missing.length === 1 ? " does" : "s do"} NOT match: ${shown.join(", ")}` +
+               (m.missing.length > shown.length ? ` (+${m.missing.length - shown.length} more)` : "") +
+               ` · please verify this one by hand before trusting the ✓` });
+      });
+    }
+
     const missedAt = slots.filter(s => s.missing.indexOf(c.id) !== -1).map(s => s.time);
 
     /* The gap is still reported as a gap — downgrading it would hide real misses, which is the
@@ -1713,7 +1751,9 @@ function reconcile(channels, opt){
              ` — ${fmtGap(l.mins)} behind the rest` });
 
   const langs = [...new Set(rows.map(r => r.lang || "—"))].sort();
-  const order = { dead:0, lang:1, missing:2, over:3, late:4, maybe:5 };
+  /* "verify" leads. Every other alert reports something the report already shows as wrong; this
+     one says a ✓ on screen may not be true, which is the failure this tool least survives. */
+  const order = { verify:0, dead:1, lang:2, missing:3, over:4, late:5, maybe:6 };
   alerts.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
 
   return { from:new Date(from).toISOString(), to:new Date(to).toISOString(),
@@ -2246,7 +2286,12 @@ function dailyCheckModal(o){
             const d = CELL[c.state];
             const tip = c.state === "lang" && c.detected
               ? `caption looks ${c.detected.lang.toUpperCase()} — ${c.detected.why}`
-              : c.state === "okc" ? (c.match && c.match.total ? `caption match: ${c.match.matched}/${c.match.total} words — the same reel went out` : `${Math.round(c.score * 100)}% caption match — ${d.t}`)
+              : c.state === "okc" ? (c.match && c.match.total
+                  ? (c.match.missing && c.match.missing.length
+                      /* an imperfect match is an estimate, and the tooltip must not call it a fact */
+                      ? `caption match: ${c.match.matched}/${c.match.total} words — ${c.match.missing.length} do NOT match (${c.match.missing.slice(0, 8).join(", ")}) — VERIFY BY HAND`
+                      : `caption match: all ${c.match.total} words — the same reel went out`)
+                  : `${Math.round(c.score * 100)}% caption match — ${d.t}`)
               : c.state === "miss" && c.match && c.match.total
                 ? `reel did NOT go out — closest caption matched only ${c.match.matched}/${c.match.total} words`
               : c.state === "miss" && c.score != null
@@ -2479,7 +2524,9 @@ function dailyCheckModal(o){
           ? `<div class="dc-miss">reel did NOT go out for the ${esc(rep.slots[i].time)} drop —
                closest caption matched only ${x.match ? x.match.matched + "/" + x.match.total : Math.round((x.score || 0) * 100) + "%"} words</div>`
           : (x.state === "okc" && rep.slots[i] && x.match
-             ? `<div class="mt" style="margin-top:4px;color:var(--grn)">✓ ${esc(rep.slots[i].time)} drop — caption matched ${x.match.matched}/${x.match.total} words</div>` : "")).join("") : ""}
+             ? (x.match.missing && x.match.missing.length
+                 ? `<div class="mt" style="margin-top:4px;color:var(--amb)">⚠ ${esc(rep.slots[i].time)} drop — counted as sent on only ${x.match.matched}/${x.match.total} words · ${x.match.missing.length} do NOT match: ${esc(x.match.missing.slice(0, 15).join(", "))}${x.match.missing.length > 15 ? " (+" + (x.match.missing.length - 15) + " more)" : ""} · verify by hand</div>`
+                 : `<div class="mt" style="margin-top:4px;color:var(--grn)">✓ ${esc(rep.slots[i].time)} drop — caption matched all ${x.match.total} words</div>`) : "")).join("") : ""}
         ${mine.length ? `<div class="dc-plist">${mine.map(p => {
           const d = detectLang(p.text), bad = r.lang && d.lang && d.lang !== r.lang;
           const t = clean(p.text);
@@ -2694,7 +2741,11 @@ function dailyCheckModal(o){
             L.push(`            matched on captions, word by word` +
               r.cells.map((x, i) => ` · ${rep.slots[i] ? rep.slots[i].time : i}:` +
                 (x.match && x.match.total
-                  ? (x.state === "okc" ? `${x.match.matched}/${x.match.total} words ✓` : `only ${x.match.matched}/${x.match.total} words — NOT sent`)
+                  ? (x.state === "okc"
+                      ? `${x.match.matched}/${x.match.total} words` +
+                        (x.match.missing && x.match.missing.length
+                          ? ` ⚠ VERIFY (${x.match.missing.length} unmatched: ${x.match.missing.slice(0, 15).join(", ")})` : ` ✓`)
+                      : `only ${x.match.matched}/${x.match.total} words — NOT sent`)
                   : x.state)).join(""));
           if(meta.routeLog && r.mode !== "timeline")
             for(const x of meta.routeLog)
