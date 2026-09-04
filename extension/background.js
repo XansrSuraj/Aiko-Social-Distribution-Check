@@ -1,7 +1,7 @@
 /**
  * Aiko Daily Check — service worker
  *
- * Collects the two platforms the server cannot reach, using the sessions this browser already
+ * Collects the platforms the server cannot reach, using the sessions this browser already
  * holds. Nothing is stored, no cookie is read, no password is involved: every request is made
  * by the browser itself, from the user's own IP, with the user's own session attached the same
  * way it is when they click a link.
@@ -970,15 +970,127 @@ async function xCollect(channels, onProgress) {
   return out;
 }
 
+/* ═══════════════════ tiktok ═══════════════════
+ *
+ * Added as a stand-in fallback while Apify (the server-side reader, clockworks/tiktok-scraper) is
+ * out of credit. TikTok server-renders a profile's recent videos into a JSON blob inside the page
+ * itself — no API call, no signing, nothing to reverse-engineer — so opening a real tab at the
+ * profile and reading that blob out of the DOM is enough, the same shape of trick api/collect.js
+ * uses for X's microdata. Two script tags carry it depending on which build of the site answers:
+ * the current one, __UNIVERSAL_DATA_FOR_REHYDRATION__, and the older SIGI_STATE some regions still
+ * serve. Both are tried; whichever exists wins.
+ */
+function ttScrape(handle) {
+  const wanted = String(handle || "").toLowerCase();
+  const num = v => (v === undefined || v === null || v === "" ? null : Number(v));
+  const tried = [];
+
+  function itemsFromRehydration() {
+    const el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+    if (!el) { tried.push("rehydration:absent"); return null; }
+    let data;
+    try { data = JSON.parse(el.textContent || "{}"); } catch (e) { tried.push("rehydration:unparsable"); return null; }
+    const scope = data.__DEFAULT_SCOPE__ || {};
+    const detail = scope["webapp.user-detail"] || {};
+    const list = detail.itemList || (detail.userInfo && detail.userInfo.itemList) || null;
+    tried.push("rehydration:" + (list ? list.length : "no-itemList"));
+    return list;
+  }
+
+  function itemsFromSigi() {
+    const el = document.getElementById("SIGI_STATE");
+    if (!el) { tried.push("sigi:absent"); return null; }
+    let data;
+    try { data = JSON.parse(el.textContent || "{}"); } catch (e) { tried.push("sigi:unparsable"); return null; }
+    const mod = data.ItemModule || {};
+    const list = Object.values(mod);
+    tried.push("sigi:" + list.length);
+    return list;
+  }
+
+  const raw = itemsFromRehydration() || itemsFromSigi() || [];
+
+  const posts = raw.map(it => {
+    const author = ((it.author && (it.author.uniqueId || it.author)) || "").toString().toLowerCase();
+    if (author && wanted && author !== wanted) return null;      // a recommended/related item riding along
+    const id = it.id || (it.video && it.video.id) || "";
+    const createTime = Number(it.createTime);
+    if (!id || !isFinite(createTime) || !createTime) return null;
+    const isPhoto = !!it.imagePost;
+    const cover = it.video && (it.video.cover || it.video.dynamicCover || it.video.originCover) || "";
+    const photoThumb = isPhoto && it.imagePost.images && it.imagePost.images[0]
+      && it.imagePost.images[0].imageURL && (it.imagePost.images[0].imageURL.urlList || [])[0];
+    const stats = it.stats || it.statsV2 || {};
+    return {
+      externalId: String(id),
+      ts: new Date(createTime * 1000).toISOString(),
+      kind: isPhoto ? "carousel" : "video",
+      text: it.desc || "",
+      views: num(stats.playCount),
+      likes: num(stats.diggCount),
+      comments: num(stats.commentCount),
+      reposts: num(stats.shareCount),
+      duration: it.video && it.video.duration != null ? Math.round(Number(it.video.duration)) : null,
+      thumb: cover || photoThumb || "",
+      permalink: `https://www.tiktok.com/@${handle}/video/${id}`,
+    };
+  }).filter(Boolean);
+
+  const bodyText = (document.body && document.body.innerText || "").slice(0, 4000);
+  let diag = "";
+  if (!posts.length) {
+    if (/verify to continue|select 2 objects|are you a human/i.test(bodyText)) diag = "TikTok showed a bot-check wall instead of the profile";
+    else if (/couldn.t find this account/i.test(bodyText)) diag = "TikTok says this account does not exist";
+    else if (raw.length && !posts.length) diag = "posts were on the page but none matched @" + handle + " (" + tried.join(", ") + ")";
+    else diag = "no video data was embedded in the page (" + tried.join(", ") + ")";
+  }
+  return { posts, tried, diag };
+}
+
+async function ttCollect(channels, onProgress) {
+  const out = [];
+  for (let i = 0; i < channels.length; i++) {
+    const c = channels[i];
+    const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
+    onProgress(`TikTok — @${handle} (${i + 1}/${channels.length})…`);
+    let tabId = null;
+    try {
+      if (!handle) throw new Error("No TikTok handle for this channel");
+      const tab = await chrome.tabs.create({ url: "https://www.tiktok.com/@" + encodeURIComponent(handle), active: false });
+      tabId = tab.id;
+      await waitForLoad(tabId);
+      const res = await runInTab(tabId, ttScrape, [handle]);
+      const posts = (res && res.posts) || [];
+      if (!posts.length) throw new Error("TikTok rendered no posts for @" + handle + " — treat as unknown, not empty." +
+        (res && res.diag ? " (" + res.diag + ")" : ""));
+      posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      out.push({ channelId: c.id, platform: "tiktok", username: handle, ok: true,
+                 note: `${posts.length} post(s) via tiktok.com (extension)`, posts, source: "extension-tiktok" });
+    } catch (e) {
+      out.push({ channelId: c.id, platform: "tiktok", username: handle, ok: false,
+                 note: String((e && e.message) || e), posts: [], source: "extension-tiktok" });
+    } finally {
+      if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
+    }
+  }
+  return out;
+}
+
 async function collect(channels, onProgress) {
   const results = [];
   const igChannels = channels.filter(c => c.platform === "instagram");
   const fbChannels = channels.filter(c => c.platform === "facebook");
   const xChannels  = channels.filter(c => c.platform === "x");
+  const ttChannels = channels.filter(c => c.platform === "tiktok");
 
   /* ---- x, read from inside a shared x.com tab (same-origin, gets the full server HTML) ---- */
   if (xChannels.length) {
     for (const r of await xCollect(xChannels, onProgress)) results.push(r);
+  }
+
+  /* ---- tiktok, one tab per channel (the profile's embedded JSON, no signing needed) ---- */
+  if (ttChannels.length) {
+    for (const r of await ttCollect(ttChannels, onProgress)) results.push(r);
   }
 
   /* ---- instagram, all accounts through one tab ---- */

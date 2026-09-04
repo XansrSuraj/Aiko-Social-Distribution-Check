@@ -1977,26 +1977,26 @@ function absorbRun(run){
   return added + counted;
 }
 
-/* One press for both halves — the server for YouTube, Telegram and X, the extension for Facebook
-   and Instagram. Only the open organization's channels are sent, so a directory with several orgs
-   never has the wrong pages opened. Falls back gracefully: if the extension is not installed the
-   server half still runs and the report says which channels are still waiting. */
+/* One press for both halves — the server for YouTube and Telegram, the extension for Facebook,
+   Instagram, X and TikTok. Only the open organization's channels are sent, so a directory with
+   several orgs never has the wrong pages opened. Falls back gracefully: if the extension is not
+   installed the server half still runs and the report says which channels are still waiting. */
 async function runEverything(o){
   await collectServer(o);
 
   /* anything the popup left behind still counts */
   absorbBrowserRun();
 
-  /* The extension is the FALLBACK for Facebook, Instagram and X — asked for a channel only when the
-     server could not read it (Apify credits out, an IP block, a key not set). A server success
-     (meta.ok) is left alone. The extension gives Facebook captions without a reliable per-post time,
-     so the content match below is deliberately strict and WORD-LEVEL: a drop is only credited to a
-     channel when most of the drop's words appear in that channel's caption — a stale, same-topic
-     caption from another day no longer matches, and the report shows exactly how many words matched
-     so a false "delivered" cannot slip through unseen. */
+  /* The extension is the FALLBACK for Facebook, Instagram, X and TikTok — asked for a channel only
+     when the server could not read it (Apify credits out, an IP block, a key not set). A server
+     success (meta.ok) is left alone. The extension gives Facebook captions without a reliable
+     per-post time, so the content match below is deliberately strict and WORD-LEVEL: a drop is only
+     credited to a channel when most of the drop's words appear in that channel's caption — a stale,
+     same-topic caption from another day no longer matches, and the report shows exactly how many
+     words matched so a false "delivered" cannot slip through unseen. */
   const srvFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
   const browserChans = dcChannels(o)
-    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x")
+    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x" || c.platform === "tiktok")
               && srvFailed(c.id))
     .map(c => ({ id:c.id, platform:c.platform, url:c.url,
                  handle:(c.handle || "").replace(/^@/, "").trim(),
