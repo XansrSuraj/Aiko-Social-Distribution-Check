@@ -33,7 +33,11 @@ async function tryGet(url, headers) {
       headers: Object.assign({ "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" }, headers || {}),
     });
     const body = await r.text();
-    return { status: r.status, body, ms: Date.now() - started };
+    /* the cookies the site handed out — a browser would send these back on the next request, and
+       whether doing so changes the answer is one of the things being measured here */
+    let setCookie = [];
+    try { setCookie = r.headers.getSetCookie ? r.headers.getSetCookie() : []; } catch (e) {}
+    return { status: r.status, body, ms: Date.now() - started, setCookie };
   } catch (e) {
     const aborted = e && (e.name === "AbortError" || /abort/i.test(String(e)));
     return { status: 0, body: "", ms: Date.now() - started,
@@ -316,6 +320,45 @@ async function deepTtList(handle) {
       }
     } catch (e) { rec.head = (r.body || "").slice(0, 200).replace(/\s+/g, " "); }
     out.steps.push(rec);
+  }
+
+  /* A browser's SECOND request to a site carries the cookies the first one set. TikTok hands out
+     ttwid (and msToken) on the first visit and treats a request without them as a stranger's — so
+     the empty itemList may simply be what a cookieless caller gets. Replaying the cookies is what
+     any HTTP client with a cookie jar does; it is not a signature or a bypass, and it is the last
+     free route worth measuring before concluding there is not one. */
+  {
+    const jar = (page.setCookie || []).map(c => String(c).split(";")[0]).filter(Boolean).join("; ");
+    out.steps.push({ step: "cookies offered by the first page load",
+                     count: (page.setCookie || []).length,
+                     names: (page.setCookie || []).map(c => String(c).split("=")[0]).slice(0, 8) });
+    if (jar) {
+      const again = await tryGet(`https://www.tiktok.com/@${encodeURIComponent(handle)}`, { Cookie: jar });
+      const parsed = ttFromHtml(again.body || "", handle);
+      out.steps.push({ step: "profile page REPLAYED with those cookies", status: again.status,
+                       bytes: (again.body || "").length, posts: parsed.posts.length,
+                       createTimes: (again.body || "").split('"createTime"').length - 1,
+                       newest: parsed.posts.length ? parsed.posts[0].ts : null,
+                       sample: parsed.posts.length ? parsed.posts[0].text.slice(0, 60) : undefined });
+
+      const listAgain = await tryGet(
+        `https://www.tiktok.com/api/post/item_list/?${qs(common)}`,
+        { Cookie: jar, Accept: "application/json, text/plain, */*",
+          Referer: `https://www.tiktok.com/@${handle}`,
+          "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" });
+      const rec2 = { step: "item_list REPLAYED with those cookies", status: listAgain.status,
+                     bytes: (listAgain.body || "").length };
+      try {
+        const j = JSON.parse(listAgain.body || "{}");
+        rec2.statusCode = j.statusCode;
+        rec2.itemListLength = Array.isArray(j.itemList) ? j.itemList.length : null;
+        if (Array.isArray(j.itemList) && j.itemList.length) {
+          rec2.newest = new Date(Number(j.itemList[0].createTime) * 1000).toISOString();
+          rec2.sample = String(j.itemList[0].desc || "").slice(0, 60);
+        }
+      } catch (e) { rec2.head = (listAgain.body || "").slice(0, 160).replace(/\s+/g, " "); }
+      out.steps.push(rec2);
+    }
   }
 
   /* TikTok's OFFICIAL creator embed. Unlike item_list this one is meant to be read by anybody —
