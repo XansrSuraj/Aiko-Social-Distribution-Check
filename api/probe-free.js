@@ -318,6 +318,36 @@ async function deepTtList(handle) {
     out.steps.push(rec);
   }
 
+  /* TikTok's OFFICIAL creator embed. Unlike item_list this one is meant to be read by anybody —
+     it is the widget TikTok gives sites to show a creator's recent videos — so it should need no
+     signature. If it carries create times it is the free reader this whole probe is looking for. */
+  for (const embed of [
+    `https://www.tiktok.com/embed/@${encodeURIComponent(handle)}`,
+    `https://www.tiktok.com/embed/v2/@${encodeURIComponent(handle)}`,
+  ]) {
+    const r = await tryGet(embed, { Accept: "text/html,*/*" });
+    const html = r.body || "";
+    const rec = { step: "creator embed " + embed.replace(/^https:\/\/www\.tiktok\.com/, ""),
+                  status: r.status, bytes: html.length, error: r.error };
+    rec.counts = {
+      createTime: html.split('"createTime"').length - 1,
+      itemList: html.split('"itemList"').length - 1,
+      videoId: html.split('"id":"7').length - 1,
+    };
+    const parsed = ttFromHtml(html, handle);
+    rec.markers = parsed.markers;
+    rec.posts = parsed.posts.length;
+    if (parsed.posts.length) { rec.newest = parsed.posts[0].ts; rec.sample = parsed.posts[0].text.slice(0, 60); }
+    /* the embed uses its own rehydration key, so also look for any create times at all */
+    const times = [...html.matchAll(/"createTime"\s*:\s*"?(\d{10})"?/g)].map(m => Number(m[1]));
+    if (times.length) {
+      rec.createTimesFound = times.length;
+      rec.newestSeen = new Date(Math.max(...times) * 1000).toISOString();
+    }
+    if (!rec.posts && !times.length) rec.head = html.slice(0, 200).replace(/\s+/g, " ");
+    out.steps.push(rec);
+  }
+
   /* other public RSSHub deployments — rsshub.app itself is behind a Cloudflare challenge from here,
      but the project is self-hostable and several open mirrors exist */
   for (const host of ["rsshub.rssforever.com", "rss.shab.fun"]) {
