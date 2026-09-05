@@ -2010,7 +2010,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.9.0";
+const EXT_WANT = "1.10.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2051,7 +2051,7 @@ try{ postMessage({ __aiko:"request", action:"ping" }, location.origin); }catch(e
    API to a full page navigation per account, X renders a real tab, TikTok is a short reachability
    probe. A flat budget gave six channels the same allowance as one, which is how the wait came to
    expire mid-run in the first place. */
-const EXT_COST_MS = { facebook:110000, instagram:95000, x:35000, tiktok:12000 };
+const EXT_COST_MS = { facebook:110000, instagram:95000, x:70000, tiktok:35000 };
 const extBudget = channels => 45000 +
   channels.reduce((t, c) => t + (EXT_COST_MS[c.platform] || 30000), 0);
 
@@ -2597,6 +2597,11 @@ function dailyCheckModal(o){
                  ? "no captions to match on — its dates cannot prove absence"
                : meta.browserRequired ? "run the extension" : "not collected")
             : r.mode === "timefold" ? "assumed delivered — posts alongside the others; ✓ = a notification confirmed it"
+            /* A SHORT row is the one place the reader's own account matters most and was never
+               shown: "5 post(s) via x.com (extension, dom)" against seven drops says immediately
+               whether the channel posted five or the reader only managed to see five. Without it a
+               shortfall gives no way to tell a real miss from a thin read. */
+            : r.status === "short" && meta.note ? meta.note
             : r.suggested ? "suggested — confirm below" : "";
           /* A channel nobody can read still has to be answered by a person, and on almost every
              day the answer is "all of them went out". Ticking four cells to say that is four times

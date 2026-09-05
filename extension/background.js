@@ -1267,7 +1267,7 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
 }
 
 async function xCollect(channels, onProgress, onResult) {
-  const XW = 22000, XP = 900;
+  const XW = 45000, XP = 900;
   /* how far back the scroll has to reach before silence inside the window means anything. Wider
      than any window the report asks for, so "covered" is never claimed on a technicality. */
   const sinceMs = Date.now() - 36 * 3600e3;
@@ -1473,6 +1473,12 @@ function ttScrape(handle) {
 
 async function ttCollect(channels, onProgress, onResult) {
   const out = [];
+  /* whichever tab the user was on, to put back if one has to be brought forward */
+  let restoreTabId = null;
+  try {
+    const [act] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (act) restoreTabId = act.id;
+  } catch (e) {}
   const done = r => { out.push(r); try { if (onResult) onResult(r); } catch (e) {} };
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
@@ -1485,16 +1491,25 @@ async function ttCollect(channels, onProgress, onResult) {
       tabId = tab.id;
       await waitForLoad(tabId);
       /* "complete" only means the document finished loading — TikTok fills its grid from its own
-         XHR afterwards, so the first read is routinely too early. Re-read a few times rather than
-         reporting an empty profile that is merely still arriving. */
+         XHR afterwards, so the first read is routinely too early. Re-read rather than reporting an
+         empty profile that is merely still arriving.
+         And bring the tab FORWARD if the quiet attempts find nothing. Chrome does not lay out a tab
+         it never shows, and TikTok — like X and Facebook before it — renders its grid only once
+         laid out. On a VPN this was the whole failure: the network probe passed, tiktok.com was
+         perfectly reachable, and the read still came back "rehydration:absent, sigi:absent, grid:0"
+         — which is not a blocked profile, it is a page that was never drawn. */
       let res = null, posts = [];
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (let attempt = 0; attempt < 7; attempt++) {
+        if (attempt === 3) {
+          onProgress(`TikTok — @${handle}: showing the tab so its grid will render…`);
+          await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+        }
         res = await runInTab(tabId, ttScrape, [handle]);
         posts = (res && res.posts) || [];
         if (posts.length) break;
         /* a bot wall or a dead handle will not improve by waiting */
         if (res && res.diag && /bot-check|does not exist|login wall/.test(res.diag)) break;
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 2000));
       }
       if (!posts.length) throw new Error("TikTok rendered no posts for @" + handle + " — treat as unknown, not empty." +
         (res && res.diag ? " (" + res.diag + ")" : ""));
@@ -1508,6 +1523,8 @@ async function ttCollect(channels, onProgress, onResult) {
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
     }
   }
+  /* put the user back where they were, whether or not a tab had to be brought forward */
+  if (restoreTabId) await chrome.tabs.update(restoreTabId, { active: true }).catch(() => {});
   return out;
 }
 
