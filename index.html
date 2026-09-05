@@ -1556,7 +1556,12 @@ function reconcile(channels, opt){
     const SETTLE_MS = 10 * 60e3;
     const coveredFrom = partial ? oldestRead : -Infinity;
     const coveredTo = readAt + SETTLE_MS;
-    const outsideRead = at => at < coveredFrom || at > coveredTo;
+    /* The reader can also say outright that it never saw the whole window — X's timeline is
+       virtualised, and when the scroll stops yielding before reaching past the window it reports
+       so. An incomplete read cannot prove absence ANYWHERE in the window, not merely before its
+       oldest post: X once returned a single tweet and the report crossed the other six drops. */
+    const readIncomplete = mode === "timeline" && meta.partialRead === true;
+    const outsideRead = at => readIncomplete || at < coveredFrom || at > coveredTo;
 
     let cells;
     if(mode === "content"){
@@ -1618,7 +1623,9 @@ function reconcile(channels, opt){
           const at = new Date(s.at).getTime();
           if(outsideRead(at))
             return { state:"unseen", post:null,
-                     why: at > coveredTo
+                     why: readIncomplete
+                       ? "the reader could not see the whole window on this channel, so nothing in it can be called missing"
+                       : at > coveredTo
                        ? "this drop went out after the channel was last read, so it could not have been seen yet"
                        : `the read reached back only to ${hhmm(new Date(oldestRead).toISOString(), tz)}, so this drop was never examined` };
           return { state:"miss", post:null };
@@ -1976,7 +1983,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.6.0";
+const EXT_WANT = "1.7.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2061,6 +2068,8 @@ function absorbRun(run){
   for(const res of run.results){
     checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
       dead:!!res.dead, suggested:!!res.suggested, at:Date.now(),
+      /* the reader itself saying it could not see the whole window — see reconcile */
+      partialRead:!!res.partialRead,
       /* what each Facebook route answered — the only way to work out a failure from a pasted
          report, since none of those routes can be reached from outside this browser */
       routeLog:res.routeLog || null };

@@ -1499,5 +1499,67 @@ console.log("\n── the coverage rule applies only where its reasoning holds")
   }
 }
 
+/* ═══════════════════ a reader that says it saw only part of the window ═══════════════════
+   X's timeline is virtualised: it renders further tweets only as they scroll into view, and in a
+   background tab — which Chrome never lays out — the scroll does nothing. A channel that had posted
+   seven times returned ONE tweet, and the report crossed the other six. The reader now says
+   outright when its scroll never reached back past the window, and that admission has to be worth
+   something: an incomplete read cannot prove absence ANYWHERE in the window, not merely before its
+   oldest post. */
+console.log("\n── a reader that admits it saw only part of the window crosses nothing");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
+    { id: "xvn", platform: "x",        name: "X · vn",        lang: "vi" },
+  ];
+  const runC = setup => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 9 });
+    setup(c);
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 9 });
+  };
+  /* three drops; X has a post in the OLDEST only — the exact shape of the live failure, where the
+     one tweet that rendered was not the newest */
+  const threeDrops = c => {
+    c.posts = {
+      ytv: [P("y1", 300, VN_TEXT), P("y2", 180, VN_TEXT), P("y3", 60, VN_TEXT)],
+      tgv: [P("t1", 301, VN_TEXT), P("t2", 181, VN_TEXT), P("t3", 61, VN_TEXT)],
+      xvn: [P("x1", 302, VN_TEXT)],
+    };
+  };
+
+  {
+    const rep = runC(c => {
+      threeDrops(c);
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 xvn: { ok: true, at: Date.now(), partialRead: true } };
+    });
+    const x = row(rep, "xvn");
+    ok(x.cells.every(cl => cl.state !== "miss"),
+      "not one drop is crossed when the reader could not see the whole window",
+      x.cells.map(cl => cl.state).join(","));
+    ok(!rep.alerts.some(a => a.kind === "missing" && a.id === "xvn"),
+      "and no missing-post alarm is raised on it");
+    ok(rep.slots.every(s => s.missing.indexOf("xvn") === -1),
+      "nor does any drop list it as missing", JSON.stringify(rep.slots.map(s => s.missing)));
+  }
+
+  /* THE GUARD: the same data from a reader that DID cover the window must still cross */
+  {
+    const rep = runC(c => {
+      threeDrops(c);
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 xvn: { ok: true, at: Date.now(), partialRead: false } };
+    });
+    const x = row(rep, "xvn");
+    ok(x.cells.filter(cl => cl.state === "miss").length === 2,
+      "a complete read still crosses the two drops it really did miss",
+      x.cells.map(cl => cl.state).join(","));
+    ok(x.status === "short", "and the channel is still reported short", x.status);
+  }
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1122,9 +1122,9 @@ function xParsePost(rawArticle, handle) {
    This second path is inherently more fragile than everywhere else in this file: X's DOM structure
    changes without notice, unlike Facebook's and Instagram's which have stayed stable for a long
    time. Expect it to need retouching if X reshuffles its markup again. */
-async function xDomScrape(handle, maxWaitMs, pollMs) {
+async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const WANT = 10, MAXW = maxWaitMs || 20000, POLL = pollMs || 900;
+  const WANT = 30, MAXW = maxWaitMs || 20000, POLL = pollMs || 900;
   const wantedAuthor = String(handle || "").toLowerCase();
 
   function numFrom(s) {
@@ -1188,22 +1188,48 @@ async function xDomScrape(handle, maxWaitMs, pollMs) {
   }
 
   const start = Date.now();
-  let best = [], stableRounds = 0, lastCount = -1;
+  let best = [], stableRounds = 0, lastCount = -1, covered = false;
   while (Date.now() - start < MAXW) {
     const found = harvest();
     if (found.length > best.length) best = found;
+
+    /* Stop on COVERAGE, not on a count. Reading ten posts means nothing on its own; reading back
+       past the start of the window means everything inside it has been seen, which is the only
+       thing that licenses calling a drop missing. Counting instead was what produced "1/7": one
+       post found, and the run declared itself finished. */
+    if (sinceMs && found.length) {
+      const oldest = found.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity);
+      if (oldest < sinceMs) { covered = true; break; }
+    }
     if (found.length >= WANT) break;
+
     /* "nothing new across several polls" only means STOP once something has actually been found —
        while it is still zero, X's own timeline call can simply not have answered yet (its GraphQL
        fetch is asynchronous and slow on a first load), and bailing out on zero was cutting the wait
        to ~3 polls instead of the full budget, so the answer was "no posts" before X had even tried
-       to render any. Zero must exhaust the whole window before giving up. */
+       to render any. Zero must exhaust the whole window before giving up.
+       Six rather than three: X's timeline is virtualised and pauses between batches, so three quiet
+       polls is a normal gap mid-scroll rather than the end of the timeline. Three was short enough
+       that a single rendered tweet ended the run in under three seconds. */
     if (found.length > 0) {
       stableRounds = found.length === lastCount ? stableRounds + 1 : 0;
-      if (stableRounds >= 3) break;                        // three polls with no NEW posts — stop asking
+      if (stableRounds >= 6) break;
     }
     lastCount = found.length;
-    window.scrollBy(0, 1400);
+
+    /* Nudge the scroll several ways, exactly as the Facebook reader has to. scrollBy alone does
+       nothing in a tab Chrome has never laid out, and X only renders further tweets as they come
+       into view — so drive the scroll position directly, pull the last article into view, and fire
+       the event the timeline listens on. */
+    try { window.scrollBy(0, 1400); } catch (e) {}
+    try {
+      const de = document.documentElement;
+      if (de) de.scrollTop = (de.scrollTop || 0) + 1400;
+      const arts = document.querySelectorAll('article[data-testid="tweet"], article[role="article"]');
+      const last = arts[arts.length - 1];
+      if (last && last.scrollIntoView) last.scrollIntoView({ block: "end" });
+      window.dispatchEvent(new Event("scroll"));
+    } catch (e) {}
     await sleep(POLL);
   }
   best.sort((a, b) => new Date(b.ts) - new Date(a.ts));
@@ -1221,13 +1247,24 @@ async function xDomScrape(handle, maxWaitMs, pollMs) {
     else if (/these tweets are protected|this account.s tweets are protected/i.test(bodyText)) diag = "this account's posts are protected (private)";
     else diag = `no tweet articles ever appeared in ${Math.round((Date.now() - start) / 1000)}s — X's page loaded but rendered nothing recognisable`;
   }
-  return { posts: best, diag };
+  /* `covered` says the scroll reached back past the window, so silence inside it is real. Without
+     it the caller cannot tell "this account posted once" from "only one tweet ever rendered". */
+  return { posts: best, diag, covered };
 }
 
 async function xCollect(channels, onProgress, onResult) {
   const XW = 22000, XP = 900;
+  /* how far back the scroll has to reach before silence inside the window means anything. Wider
+     than any window the report asks for, so "covered" is never claimed on a technicality. */
+  const sinceMs = Date.now() - 36 * 3600e3;
   const out = [];
   const done = r => { out.push(r); try { if (onResult) onResult(r); } catch (e) {} };
+  /* whichever tab the user was on, to put back if one has to be brought forward */
+  let restoreTabId = null;
+  try {
+    const [act] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (act) restoreTabId = act.id;
+  } catch (e) {}
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
@@ -1240,7 +1277,7 @@ async function xCollect(channels, onProgress, onResult) {
       await waitForLoad(tabId);
 
       /* route 1: the page's own server-rendered HTML, if it still carries the microdata */
-      let posts = [], via = "microdata";
+      let posts = [], via = "microdata", xCovered = false;
       try {
         const html = await runInTab(tabId, () => document.documentElement.outerHTML, []);
         if (html) posts = xArticles(html).map(a => xParsePost(a, handle)).filter(Boolean);
@@ -1248,13 +1285,33 @@ async function xCollect(channels, onProgress, onResult) {
 
       /* route 2: the live, rendered timeline — X's own app, read the way a person reading the page
          would see it. Only the words/time/link/counts are reliable this way, not the richer stats
-         and media the microdata carries when it is there. */
+         and media the microdata carries when it is there.
+
+         Tried quietly first, then AGAIN with the tab brought forward. Chrome does not lay out a tab
+         it never shows, and X's timeline is virtualised — it renders further tweets only as they
+         scroll into view — so in a background tab the scroll does nothing and the reader sees only
+         whatever happened to render on load. That is how a channel with seven posts reported one,
+         and then crossed the other six. The Facebook reader has always had to do this; X needs it
+         for exactly the same reason. */
       let diag = "";
       if (!posts.length) {
         via = "dom";
-        const res = await runInTab(tabId, xDomScrape, [handle, XW, XP]);
+        let res = await runInTab(tabId, xDomScrape, [handle, 7000, XP, sinceMs]);
+        if (!res || !res.covered) {
+          onProgress(`X — @${handle}: showing the tab so its timeline will scroll…`);
+          await chrome.tabs.update(tabId, { active: true }).catch(() => {});
+          const second = await runInTab(tabId, xDomScrape, [handle, XW, XP, sinceMs]);
+          /* keep whichever pass saw more — bringing the tab forward should help, never lose ground */
+          if (second && (second.posts || []).length >= ((res && res.posts) || []).length) res = second;
+          if (res) res.neededFocus = true;
+        }
         posts = (res && res.posts) || [];
         diag = (res && res.diag) || "";
+        xCovered = !!(res && res.covered);
+        /* a read that never got back past the window cannot support a cross, and says so */
+        if (posts.length && !(res && res.covered))
+          diag = `only ${posts.length} tweet(s) rendered before the timeline stopped giving more — ` +
+                 `the window was not covered end to end`;
       }
 
       /* zero posts is indistinguishable from a dead handle, a login wall, or X declining this
@@ -1264,7 +1321,12 @@ async function xCollect(channels, onProgress, onResult) {
         (diag ? " (" + diag + ")" : " (If your browser is not logged into x.com, log in and try again.)"));
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
       done({ channelId: c.id, platform: "x", username: handle, ok: true,
-                 note: `${posts.length} post(s) via x.com (extension, ${via})`, posts, source: "extension-x" });
+                 note: `${posts.length} post(s) via x.com (extension, ${via})` + (diag ? ` · ${diag}` : ""),
+                 /* the microdata route hands over whatever the page shipped and cannot be scrolled,
+                    so it is never a covered read either — only a DOM scrape that reached back past
+                    the window may license crossing a drop */
+                 partialRead: !xCovered,
+                 posts, source: "extension-x" });
     } catch (e) {
       done({ channelId: c.id, platform: "x", username: handle, ok: false,
                  note: String((e && e.message) || e), posts: [], source: "extension-x" });
@@ -1272,6 +1334,8 @@ async function xCollect(channels, onProgress, onResult) {
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
     }
   }
+  /* put the user back where they were, whether or not a tab had to be brought forward */
+  if (restoreTabId) await chrome.tabs.update(restoreTabId, { active: true }).catch(() => {});
   return out;
 }
 

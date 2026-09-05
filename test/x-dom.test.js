@@ -166,6 +166,66 @@ async function run(articles, handle) {
   ok(posts.length === 2, "the same id appearing twice (re-rendered mid-scroll) counts once", posts.map(p => p.externalId).join(","));
   ok(posts[0] && posts[0].externalId === "222", "newest first — the report relies on it", posts.map(p => p.externalId).join(","));
 
+  /* ═══════ a virtualised timeline delivers in batches — one tweet is not an answer ═══════
+     The live failure: a channel that had posted seven times reported ONE, and the report then
+     crossed the other six. X renders further tweets only as they scroll into view, so the reader
+     saw whatever happened to be on screen, the count stopped changing, and three quiet polls ended
+     the run in under three seconds. Stopping on a COUNT is the mistake — the only thing that
+     licenses calling a drop missing is having scrolled back PAST the window. */
+  console.log("\n── a virtualised timeline is read to the end of the window, not to a count");
+  {
+    /* tweets appear a batch at a time, the way a virtualised list actually fills */
+    const mk = mins => tweet({ id: String(700000 + mins), mins });
+    const batches = [
+      [mk(30)],                                        // only the newest is rendered at first
+      [mk(30), mk(120)],
+      [mk(30), mk(120), mk(300)],
+      [mk(30), mk(120), mk(300), mk(3000)],            // this one is older than the window
+    ];
+    let calls = 0;
+    const document = {
+      querySelectorAll: sel => {
+        if (!sel.includes("article")) return [];
+        /* a batch arrives only every fifth poll — a virtualised list pauses between them, and a
+           reader that quits after three unchanged polls never sees the second batch */
+        const b = batches[Math.min(Math.floor(calls++ / 8), batches.length - 1)];
+        return b;
+      },
+      querySelector: () => null, body: { innerText: "" },
+      documentElement: { scrollTop: 0 },
+    };
+    const window = { scrollBy: () => {}, dispatchEvent: () => {}, innerHeight: 900 };
+    const setTimeout = (fn) => { fn(); return 0; };
+    const fn = new Function("document", "window", "setTimeout", "Event",
+      body + "\n;return xDomScrape;")(document, window, setTimeout, function Event() {});
+    const sinceMs = Date.now() - 24 * 3600e3;            // a one-day window
+    const res = await fn("sportsfc_vn", 5000, 5, sinceMs);
+    ok(res.posts.length >= 3,
+      "it keeps scrolling past the first rendered tweet instead of stopping at one",
+      `found ${res.posts.length}: ` + res.posts.map(p => p.externalId).join(","));
+    ok(res.covered === true,
+      "and reports the window as covered once it reaches a post older than it", String(res.covered));
+  }
+
+  /* the other half of the same rule: a timeline that genuinely stops giving more must NOT claim
+     the window was covered, so the report can decline to cross anything on the strength of it */
+  {
+    let calls = 0;
+    const only = [tweet({ id: "900001", mins: 30 })];
+    const document = {
+      querySelectorAll: sel => { calls++; return sel.includes("article") ? only : []; },
+      querySelector: () => null, body: { innerText: "" }, documentElement: { scrollTop: 0 },
+    };
+    const window = { scrollBy: () => {}, dispatchEvent: () => {}, innerHeight: 900 };
+    const setTimeout = (fn) => { fn(); return 0; };
+    const fn = new Function("document", "window", "setTimeout", "Event",
+      body + "\n;return xDomScrape;")(document, window, setTimeout, function Event() {});
+    const res = await fn("sportsfc_vn", 3000, 5, Date.now() - 24 * 3600e3);
+    ok(res.posts.length === 1, "the one tweet that did render is still returned", String(res.posts.length));
+    ok(res.covered === false,
+      "but the window is NOT claimed as covered, so nothing may be crossed on it", String(res.covered));
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
