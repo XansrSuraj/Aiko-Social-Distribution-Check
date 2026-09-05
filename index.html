@@ -1971,7 +1971,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.3.0";
+const EXT_WANT = "1.4.0";
 let extVersion = null;
 const extStale = () => !!(extVersion && extVersion !== EXT_WANT);
 const extWaiters = new Map();               // request id -> resolve

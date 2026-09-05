@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aiko Daily Check",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Counts today's posts on the Facebook, Instagram, X (Twitter) and TikTok channels in your Aiko directory, using the sessions and IP already in this browser. Used as a fallback for when a server-side fetch is refused.",
   "permissions": ["storage", "scripting", "tabs"],
   "host_permissions": [
