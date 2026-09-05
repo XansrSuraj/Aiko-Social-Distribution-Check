@@ -256,10 +256,65 @@ function igTabScrape(handle, maxWaitMs, pollMs) {
 
     /* the grid's own links, as corroboration — they prove posts exist even in the case where no
        instant could be read, which is the difference between "nothing posted" and "could not read" */
-    const gridCodes = new Set();
+    const gridCodes = new Map();
     for (const a of document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) {
       const m = (a.getAttribute("href") || "").match(/\/(p|reel)\/([\w-]+)/);
-      if (m) gridCodes.add(m[2]);
+      if (!m) continue;
+      if (!gridCodes.has(m[2])) {
+        const img = a.querySelector("img");
+        gridCodes.set(m[2], { kind: m[1] === "reel" ? "reel" : "image",
+                              text: (img && img.getAttribute("alt")) || "",
+                              thumb: (img && img.getAttribute("src")) || "" });
+      }
+    }
+
+    /* ── ask each post for its own date ────────────────────────────────────────
+       The grid renders the posts but carries no instant for any of them — measured live: twelve
+       posts on the page, zero dates anywhere in its JSON. Without a date a post cannot be matched
+       to a drop, so the channel reported nothing while a dozen posts sat plainly on screen.
+       Instagram will still say WHEN each one went out, one post at a time: /p/<code>/embed/ is a
+       public, keyless page that carries the post's own timestamp. It is same-origin from here, so
+       the session rides along and no permission question arises.
+       Deliberately NOT derived from the shortcode. A shortcode does encode a timestamp, but the
+       decoding could not be checked against a known-good post from here, and a plausible-looking
+       date that is quietly wrong is far worse than no date at all — it would silently match posts
+       to the wrong drops. This asks Instagram and believes only what it answers. */
+    if (!seen.size && gridCodes.size) {
+      const codes = [...gridCodes.keys()].slice(0, 14);
+      const budget = Date.now() + 20000;
+      for (const code of codes) {
+        if (Date.now() > budget) break;
+        let html = "";
+        try {
+          const r = await fetch("/p/" + encodeURIComponent(code) + "/embed/captioned/",
+                                { credentials: "include" });
+          if (r.ok) html = await r.text();
+        } catch (e) { /* one post failing is not the channel failing */ }
+        if (!html) continue;
+        let at = null;
+        const unix = html.match(/"taken_at_timestamp"\s*:\s*(\d{9,11})/);
+        if (unix) at = Number(unix[1]) * 1000;
+        if (at === null) {
+          const dt = html.match(/datetime="([^"]+)"/);
+          const t = dt ? new Date(dt[1]).getTime() : NaN;
+          if (isFinite(t)) at = t;
+        }
+        /* no date found means no date claimed — the post is simply left out */
+        if (at === null || !isFinite(at)) continue;
+        const meta = gridCodes.get(code) || {};
+        const cap = html.match(/"edge_media_to_caption"[\s\S]{0,200}?"text"\s*:\s*"((?:[^"\\]|\\.){0,600})"/);
+        let text = meta.text || "";
+        if (cap) { try { text = JSON.parse('"' + cap[1] + '"'); } catch (e) {} }
+        seen.set(code, {
+          externalId: code,
+          ts: new Date(at).toISOString(),
+          kind: meta.kind === "reel" ? "reel" : "image",
+          text,
+          views: null, likes: null, comments: null, duration: null,
+          thumb: meta.thumb || "",
+          permalink: "https://www.instagram.com/" + (meta.kind === "reel" ? "reel/" : "p/") + code + "/",
+        });
+      }
     }
 
     const posts = [...seen.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
@@ -271,7 +326,8 @@ function igTabScrape(handle, maxWaitMs, pollMs) {
         diag = "a login page is showing — this browser is not logged into instagram.com";
       else if (/sorry, this page isn.t available/i.test(bodyText)) diag = "Instagram says this profile does not exist";
       else if (/this account is private/i.test(bodyText)) diag = "this account is private to the logged-in user";
-      else if (gridCodes.size) diag = `the grid shows ${gridCodes.size} post(s) but none carried a readable date`;
+      else if (gridCodes.size) diag = `the grid shows ${gridCodes.size} post(s), but neither the ` +
+        `page's own data nor asking each post for its date returned one`;
       else diag = `no post data was embedded in the page (${blocks} json block(s), ${rounds} pass(es))`;
     }
     return { posts, diag, blocks, rounds, gridCodes: gridCodes.size, url: location.href };

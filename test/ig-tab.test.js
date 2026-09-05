@@ -34,7 +34,14 @@ const check = (good, label, extra) => {
 function pageWith(jsonBlocks, opts) {
   const o = opts || {};
   const scripts = jsonBlocks.map(j => ({ textContent: typeof j === "string" ? j : JSON.stringify(j) }));
-  const gridLinks = (o.gridHrefs || []).map(h => ({ getAttribute: () => h }));
+  const gridLinks = (o.gridHrefs || []).map((h, i) => ({
+    getAttribute: k => (k === "href" ? h : null),
+    /* the grid's thumbnail carries the alt text the reader falls back to for a caption */
+    querySelector: sel => (/img/.test(sel)
+      ? { getAttribute: k => (k === "alt" ? ((o.gridAlts || [])[i] || "")
+                            : k === "src" ? "https://scontent/g" + i + ".jpg" : null) }
+      : null),
+  }));
   return {
     querySelectorAll: sel => {
       if (sel === 'script[type="application/json"]') return scripts;
@@ -46,11 +53,20 @@ function pageWith(jsonBlocks, opts) {
   };
 }
 
-function run(handle, doc, location) {
-  const fn = new Function("document", "location", "setTimeout", "handle",
+/* `embeds` maps a shortcode to the HTML its /p/<code>/embed/ page would return, standing in for
+   the per-post date lookup. Absent, every embed fetch simply fails, which is itself a case worth
+   covering: no date must ever be invented for a post whose date could not be read. */
+function run(handle, doc, location, embeds) {
+  const fetchStub = async url => {
+    const m = String(url).match(/\/p\/([\w-]+)\/embed/);
+    const html = m && embeds && embeds[m[1]];
+    if (!html) throw new Error("no embed stub for " + url);
+    return { ok: true, text: async () => html };
+  };
+  const fn = new Function("document", "location", "setTimeout", "fetch", "handle",
     body + "\n;return igTabScrape(handle, 3000, 1);");
   return fn(doc, location || { pathname: "/" + handle + "/", href: "https://www.instagram.com/" + handle + "/" },
-            (f, ms) => setTimeout(f, 0), handle);
+            (f, ms) => setTimeout(f, 0), fetchStub, handle);
 }
 
 (async () => {
@@ -119,6 +135,45 @@ function run(handle, doc, location) {
       JSON.stringify(r.posts.map(p => p.externalId)) + " diag=" + (r.diag || "-"));
     check(r.posts.length === 1 && r.posts[0].kind === "reel",
       "and it is still classified correctly at that depth", r.posts[0] && r.posts[0].kind);
+  }
+
+  /* ── the grid renders posts but the page carries no dates ───────────────────
+     Measured live on a logged-in profile: twelve posts on screen, and not one date anywhere in the
+     page's JSON. Without an instant a post cannot be matched to a drop, so the channel reported
+     nothing while a dozen posts sat plainly visible. Each post is therefore asked for its own date
+     via its public embed — and only a date Instagram actually returns is ever used. */
+  {
+    const embedFor = (unix, caption) =>
+      `<html><body><script>window.__d=({"taken_at_timestamp":${unix},` +
+      `"edge_media_to_caption":{"edges":[{"node":{"text":"${caption}"}}]}})</script></body></html>`;
+    const doc = pageWith([], { gridHrefs: ["/p/AAA111/", "/reel/BBB222/", "/p/CCC333/"] });
+    const r = await run("sportsfc.vn", doc, null, {
+      AAA111: embedFor(1755000000, "first post"),
+      BBB222: embedFor(1755009000, "the reel"),
+      /* CCC333 has no embed available — it must simply be left out, never dated by guesswork */
+    });
+    check(r.posts.length === 2, "a post whose date the embed returned is recovered", r.posts.length);
+    check(r.posts[0].externalId === "BBB222" && r.posts[0].kind === "reel",
+      "a /reel/ link keeps its kind and the newest sorts first",
+      r.posts.map(p => p.externalId + ":" + p.kind).join(","));
+    check(r.posts[0].ts === new Date(1755009000 * 1000).toISOString(),
+      "the instant is the one Instagram gave, not one derived from the shortcode", r.posts[0].ts);
+    check(r.posts.find(p => p.externalId === "AAA111").text === "first post",
+      "the caption comes from the embed");
+    check(!r.posts.some(p => p.externalId === "CCC333"),
+      "a post whose date could NOT be read is left out rather than dated by guesswork",
+      JSON.stringify(r.posts.map(p => p.externalId)));
+    check(r.posts.every(p => p.likes === null && p.views === null),
+      "counts the embed does not carry stay null — never a fabricated zero");
+  }
+
+  /* and when no embed answers at all, the channel still reports unknown rather than empty */
+  {
+    const doc = pageWith([], { gridHrefs: ["/p/ZZZ999/"] });
+    const r = await run("sportsfc.vn", doc, null, {});
+    check(!r.posts.length && /neither the page's own data nor asking each post/.test(r.diag),
+      "with no date obtainable anywhere, it says so plainly instead of reporting nothing posted",
+      r.diag);
   }
 
   /* ── someone else's post riding along in the same payload ──────────────────── */

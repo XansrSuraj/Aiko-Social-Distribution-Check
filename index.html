@@ -1976,7 +1976,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.4.1";
+const EXT_WANT = "1.5.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2392,8 +2392,17 @@ function dailyCheckModal(o){
     const brwIds = chans.filter(c => EXT_PLATFORMS.indexOf(c.platform) !== -1).map(c => c.id);
     const platNames = ids => [...new Set(chans.filter(c => ids.indexOf(c.id) !== -1)
       .map(c => platform(c.platform).name))].join(" · ");
-    const gotFrom = ids => ids.filter(id => (checks.posts[id] || []).length ||
-      Object.keys(checks.counts || {}).some(d => checks.counts[d][id])).length;
+    /* A channel whose LATEST read failed has no usable data, however much of it is still in
+       storage from an earlier run — that is the rule reconcile() judges by, and the panel has to
+       use the same one or the two contradict each other. They did: X kept posts from a run before
+       twitterapi.io ran out of credit, so the panel counted it as read ("3/6") and left it out of
+       the reasons list, while the matrix correctly showed it as "—". The channel that most needed
+       explaining was the one silently excluded from the explanation. */
+    const readOk = id => { const m = (checks.meta || {})[id]; return !(m && m.ok === false); };
+    const hasData = id => readOk(id) && ((checks.posts[id] || []).length ||
+      (checks.captions[id] || []).length ||
+      Object.keys(checks.counts || {}).some(d => (checks.counts[d] || {})[id]));
+    const gotFrom = ids => ids.filter(hasData).length;
     let pending = null;
     try{ pending = JSON.parse(localStorage.getItem(BRUN) || "null"); }catch(e){}
     const pendingN = pending && Array.isArray(pending.results) ? pending.results.length : 0;
@@ -2432,7 +2441,7 @@ function dailyCheckModal(o){
              what happened is already recorded; it is simply printed here, where the shortfall is
              being reported, instead of leaving it to be hunted for further down the report. */
           const silent = brwIds
-            .filter(id => !(checks.posts[id] || []).length && !(checks.captions[id] || []).length)
+            .filter(id => !hasData(id))
             .map(id => ({ id, note: ((checks.meta || {})[id] || {}).note || "" }))
             .filter(x => x.note);
           if(!silent.length) return "";
