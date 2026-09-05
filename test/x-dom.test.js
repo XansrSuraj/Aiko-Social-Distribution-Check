@@ -302,6 +302,41 @@ async function run(articles, handle) {
       String(res.covered));
   }
 
+  /* ═══════ X refusing to serve is not the account being empty ═══════
+     After several runs of hard scrolling, X started answering with its "Something went wrong"
+     page: no articles, and none of the wordings the other diagnostics look for. It fell through to
+     "rendered nothing recognisable", which reads like a broken reader when it is in fact X
+     declining to serve this browser for a while. The distinction decides what to DO — a throttle
+     is waited out, a broken reader is fixed — so it has to be named, and it has to be reported as
+     a refusal so nothing is crossed on the strength of it. */
+  console.log("\n── X's throttle page is named as a refusal, not an empty account");
+  {
+    const mk = bodyText => new Function("document", "window", "setTimeout", body + "\n;return xDomScrape;")(
+      { querySelectorAll: () => [], querySelector: () => null, body: { innerText: bodyText },
+        documentElement: { scrollTop: 0 } },
+      { scrollBy: () => {}, dispatchEvent: () => {}, innerHeight: 900 }, fn => { fn(); return 0; }
+    );
+
+    let res = await mk("Something went wrong. Try reloading.")("sportsfc_vn", 100, 10);
+    ok(res.posts.length === 0 && /rate-limiting/i.test(res.diag),
+      "X's 'something went wrong' page is named as rate limiting", res.diag);
+    ok(res.throttled === true, "and reported as a refusal, so a retry is worth making", String(res.throttled));
+    ok(res.covered === false, "and never as a covered read — nothing may be crossed on it", String(res.covered));
+
+    res = await mk("Rate limit exceeded")("sportsfc_vn", 100, 10);
+    ok(res.throttled === true, "an explicit rate-limit message counts too", res.diag);
+
+    /* a genuinely unrecognisable page is still NOT a throttle — the retry would be wasted */
+    res = await mk("an ordinary page with nothing on it")("sportsfc_vn", 100, 10);
+    ok(res.throttled === false && /rendered nothing recognisable/.test(res.diag),
+      "but an ordinary empty page is not mistaken for one", res.diag);
+
+    /* and a login wall is a refusal too — retrying is pointless but crossing is worse */
+    res = await mk("Log in to X\nSee what's happening")("sportsfc_vn", 100, 10);
+    ok(res.throttled === true && /not logged into/.test(res.diag),
+      "a login wall is likewise a refusal, never an empty account", res.diag);
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

@@ -1252,22 +1252,31 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
      differently from a page that simply took its time, and the next person debugging this should
      not have to guess which one happened. Checked only on the empty path — it costs nothing when
      posts were actually found. */
-  let diag = "";
+  let diag = "", throttled = false;
   if (!best.length) {
     const bodyText = (document.body && document.body.innerText || "").slice(0, 4000);
     if (document.querySelector('a[href="/i/flow/login"], [data-testid="loginButton"], [data-testid="login"]') ||
         /log in to x|sign in to x/i.test(bodyText)) diag = "a login prompt is showing — the browser is not logged into x.com";
     else if (/this account doesn.t exist|user not found/i.test(bodyText)) diag = "X says this account does not exist";
     else if (/these tweets are protected|this account.s tweets are protected/i.test(bodyText)) diag = "this account's posts are protected (private)";
+    /* X's throttle page. It carries none of the wordings above and no articles at all, so it used
+       to fall through to "rendered nothing recognisable" — which reads like a broken reader when it
+       is in fact X declining to serve this browser for a while. Naming it matters: the response to
+       a throttle is to back off and try later, not to change any code. */
+    else if (/something went wrong|try reloading|rate limit|too many requests|retry/i.test(bodyText))
+      diag = "X is rate-limiting this browser (its 'something went wrong' page) — it is refusing to " +
+             "serve the timeline for now, so nothing here can be judged; it clears on its own";
     else diag = `no tweet articles ever appeared in ${Math.round((Date.now() - start) / 1000)}s — X's page loaded but rendered nothing recognisable`;
+    /* whichever of those it was, it is a refusal rather than an empty account */
+    throttled = /rate-limiting|login prompt/.test(diag);
   }
   /* `covered` says the scroll reached back past the window, so silence inside it is real. Without
      it the caller cannot tell "this account posted once" from "only one tweet ever rendered". */
-  return { posts: best, diag, covered };
+  return { posts: best, diag, covered, throttled };
 }
 
 async function xCollect(channels, onProgress, onResult) {
-  const XW = 45000, XP = 900;
+  const XW = 30000, XP = 1400;
   /* how far back the scroll has to reach before silence inside the window means anything. Wider
      than any window the report asks for, so "covered" is never claimed on a technicality. */
   const sinceMs = Date.now() - 36 * 3600e3;
@@ -1323,29 +1332,27 @@ async function xCollect(channels, onProgress, onResult) {
         diag = (res && res.diag) || "";
         xCovered = !!(res && res.covered);
 
-        /* ── and again on /with_replies ──────────────────────────────────────
-           X's profile "Posts" tab OMITS the account's replies and the continuations of its own
-           threads. Those are still posts the channel made, and on a channel that threads its
-           coverage they are a large share of the day. This is what was left after the reader was
-           fixed: it read 32 tweets, covered the window, and two drops still had nothing — because
-           the tweets for them were never on the tab it was reading.
-           /with_replies carries both, and everything on it is filtered by author anyway, so
-           merging can only ever ADD this account's own posts. */
-        try {
-          onProgress(`X — @${handle}: checking replies and threads too…`);
-          await chrome.tabs.update(tabId, { url: "https://x.com/" + encodeURIComponent(handle) + "/with_replies" });
-          await waitForLoad(tabId);
-          const more = await runInTab(tabId, xDomScrape, [handle, XW, XP, sinceMs]);
-          const seenIds = new Set(posts.map(p => p.externalId));
-          let added = 0;
-          for (const p of (more && more.posts) || []) {
-            if (seenIds.has(p.externalId)) continue;
-            seenIds.add(p.externalId); posts.push(p); added++;
-          }
-          if (added) via += "+replies";
-          /* either tab reaching past the window is enough to have covered it */
-          xCovered = xCovered || !!(more && more.covered);
-        } catch (e) { /* the main tab's result stands on its own */ }
+        /* ── if X refused, wait and ask once more ────────────────────────────
+           A throttle is not an answer about the account, and it clears on its own. Reloading
+           after a pause is the whole remedy — and it is cheap, because it only ever runs when the
+           first pass came back with nothing.
+           There USED to be a second pass over /with_replies here, on the theory that X hides
+           replies and thread continuations from the Posts tab. It was measured across a live run
+           and added exactly ZERO posts, while doubling how hard this hits X — which is very likely
+           what earned the throttle in the first place. A theory that costs and does not pay is
+           removed rather than kept "just in case". */
+        if (!posts.length && res && res.throttled) {
+          onProgress("X — @" + handle + ": X is throttling; waiting before one more try…");
+          await new Promise(r => setTimeout(r, 12000));
+          try {
+            await chrome.tabs.reload(tabId);
+            await waitForLoad(tabId);
+            const again = await runInTab(tabId, xDomScrape, [handle, XW, XP, sinceMs]);
+            if (again && (again.posts || []).length) {
+              posts = again.posts; diag = again.diag || ""; xCovered = !!again.covered;
+            } else if (again && again.diag) diag = again.diag;
+          } catch (e) { /* the first answer stands */ }
+        }
         /* a read that never got back past the window cannot support a cross, and says so */
         if (posts.length && !(res && res.covered))
           diag = `only ${posts.length} tweet(s) rendered before the timeline stopped giving more — ` +
