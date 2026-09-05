@@ -212,8 +212,17 @@ function igTabScrape(handle, maxWaitMs, pollMs) {
     });
   };
 
+  /* The depth cap has to clear Meta's wrapper, which is enormous before any post is reached:
+     require[] -> ["ScheduledServerJS"…] -> [{__bbox}] -> __bbox -> require[] ->
+     ["RelayPrefetchedStreamCache"…] -> ["adp_…",{__bbox}] -> __bbox -> result -> data ->
+     xdt_api__v1__feed__user_timeline_graphql_connection -> edges[] -> {node}
+     — sixteen levels down, counting one per array element as well as per key. A cap of 14 meant
+     this walk could never reach a single real post on a live profile while every fixture in the
+     test suite (all ten levels deep) passed happily. The cap is only a runaway guard, so it is set
+     far above anything Meta plausibly nests; the seen-Map bounds the output, and JSON.parse output
+     cannot contain a cycle. */
   const walk = (v, depth) => {
-    if (!v || typeof v !== "object" || depth > 14) return;
+    if (!v || typeof v !== "object" || depth > 60) return;
     if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
     keep(v);
     for (const k in v) {
@@ -270,8 +279,10 @@ function igTabScrape(handle, maxWaitMs, pollMs) {
 }
 
 /* one tab per account: the profile page IS the request that works, so each account needs its own */
-async function igTabCollect(channels, onProgress) {
+async function igTabCollect(channels, onProgress, onResult) {
   const out = [];
+  /* hand each channel over the instant it is done — see collect()'s note on why batching is unsafe */
+  const done = r => { out.push(r); try { if (onResult) onResult(r); } catch (e) {} };
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
@@ -286,12 +297,12 @@ async function igTabCollect(channels, onProgress) {
       const posts = (res && res.posts) || [];
       if (!posts.length) throw new Error("Instagram's profile page gave no readable posts for @" + handle +
         " — treat as unknown, not empty." + (res && res.diag ? " (" + res.diag + ")" : ""));
-      out.push({ channelId: c.id, platform: "instagram", username: handle, ok: true,
+      done({ channelId: c.id, platform: "instagram", username: handle, ok: true,
                  note: `${posts.length} post(s) via the profile page (extension)` +
                        (res.gridCodes ? ` · ${res.gridCodes} in the grid` : ""),
                  posts, source: "extension-instagram-page" });
     } catch (e) {
-      out.push({ channelId: c.id, platform: "instagram", username: handle, ok: false,
+      done({ channelId: c.id, platform: "instagram", username: handle, ok: false,
                  note: String((e && e.message) || e), posts: [], source: "extension-instagram-page" });
     } finally {
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
@@ -1075,9 +1086,10 @@ async function xDomScrape(handle, maxWaitMs, pollMs) {
   return { posts: best, diag };
 }
 
-async function xCollect(channels, onProgress) {
+async function xCollect(channels, onProgress, onResult) {
   const XW = 22000, XP = 900;
   const out = [];
+  const done = r => { out.push(r); try { if (onResult) onResult(r); } catch (e) {} };
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
@@ -1113,10 +1125,10 @@ async function xCollect(channels, onProgress) {
       if (!posts.length) throw new Error("X rendered no posts for @" + handle + " — treat as unknown, not empty." +
         (diag ? " (" + diag + ")" : " (If your browser is not logged into x.com, log in and try again.)"));
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-      out.push({ channelId: c.id, platform: "x", username: handle, ok: true,
+      done({ channelId: c.id, platform: "x", username: handle, ok: true,
                  note: `${posts.length} post(s) via x.com (extension, ${via})`, posts, source: "extension-x" });
     } catch (e) {
-      out.push({ channelId: c.id, platform: "x", username: handle, ok: false,
+      done({ channelId: c.id, platform: "x", username: handle, ok: false,
                  note: String((e && e.message) || e), posts: [], source: "extension-x" });
     } finally {
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
@@ -1202,8 +1214,9 @@ function ttScrape(handle) {
   return { posts, tried, diag };
 }
 
-async function ttCollect(channels, onProgress) {
+async function ttCollect(channels, onProgress, onResult) {
   const out = [];
+  const done = r => { out.push(r); try { if (onResult) onResult(r); } catch (e) {} };
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
@@ -1219,10 +1232,10 @@ async function ttCollect(channels, onProgress) {
       if (!posts.length) throw new Error("TikTok rendered no posts for @" + handle + " — treat as unknown, not empty." +
         (res && res.diag ? " (" + res.diag + ")" : ""));
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-      out.push({ channelId: c.id, platform: "tiktok", username: handle, ok: true,
+      done({ channelId: c.id, platform: "tiktok", username: handle, ok: true,
                  note: `${posts.length} post(s) via tiktok.com (extension)`, posts, source: "extension-tiktok" });
     } catch (e) {
-      out.push({ channelId: c.id, platform: "tiktok", username: handle, ok: false,
+      done({ channelId: c.id, platform: "tiktok", username: handle, ok: false,
                  note: String((e && e.message) || e), posts: [], source: "extension-tiktok" });
     } finally {
       if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
@@ -1231,8 +1244,30 @@ async function ttCollect(channels, onProgress) {
   return out;
 }
 
-async function collect(channels, onProgress) {
+/**
+ * Read every channel the server could not, and hand each one over THE MOMENT it is done.
+ *
+ * `onResult` is what makes a slow channel harmless. This used to return one payload at the end,
+ * and the page gave the whole run a single 180-second deadline — so one slow or impossible channel
+ * did not merely fail itself, it destroyed the entire run. That is exactly what happened when a
+ * TikTok reader was added on a network that blocks tiktok.com: the tab could never load, it burned
+ * the navigation timeout on every run, the deadline passed, and Facebook — which had already been
+ * read successfully — was thrown away with it. A channel that worked yesterday went blank because
+ * of an unrelated channel that never could.
+ *
+ * So results now leave here one at a time, as soon as each is known. Whatever has been collected
+ * when the deadline arrives is already in the report, and the deadline stops being a data-loss
+ * event. Order matters for the same reason: the cheap, reliable readers run FIRST, so the ones
+ * most likely to succeed are banked before anything expensive is attempted.
+ */
+async function collect(channels, onProgress, onResult) {
   const results = [];
+  /* bank it and hand it over immediately — never batch */
+  const emit = r => {
+    results.push(r);
+    try { if (onResult) onResult(r); } catch (e) { /* the page not listening must not stop the run */ }
+    return r;
+  };
   const igChannels = channels.filter(c => c.platform === "instagram");
   const fbChannels = channels.filter(c => c.platform === "facebook");
   const xChannels  = channels.filter(c => c.platform === "x");
@@ -1240,12 +1275,10 @@ async function collect(channels, onProgress) {
 
   /* ---- x, read from inside a shared x.com tab (same-origin, gets the full server HTML) ---- */
   if (xChannels.length) {
-    for (const r of await xCollect(xChannels, onProgress)) results.push(r);
-  }
-
-  /* ---- tiktok, one tab per channel (the profile's embedded JSON, no signing needed) ---- */
-  if (ttChannels.length) {
-    for (const r of await ttCollect(ttChannels, onProgress)) results.push(r);
+    /* emit is passed IN so each channel lands as it finishes; the returned array is only
+       used to keep the final payload complete, and re-emitting is harmless (results are merged
+       by channel id, and meta is simply overwritten with the same value) */
+    await xCollect(xChannels, onProgress, emit);
   }
 
   /* ---- instagram: the API routes first, then the profile page for whatever they missed ----
@@ -1285,22 +1318,28 @@ async function collect(channels, onProgress) {
       if (tab && !tab.reuse) await chrome.tabs.remove(tab.tabId).catch(() => {});
     }
 
-    /* a dead handle is a real answer — retrying it on the page would only confirm it slowly */
+    /* Anything the cheap route already settled goes out NOW rather than waiting behind the page
+       route, which can take a minute per remaining account. Holding these back was the whole
+       reason Instagram contributed nothing when a run overran. */
     const stillMissing = igChannels.filter(c => {
       const r = igResults.get(c.id);
+      /* a dead handle is a real answer — retrying it on the page would only confirm it slowly */
+      const settled = r && (r.ok || r.dead);
+      if (settled) emit(r);
       return r && !r.ok && !r.dead;
     });
+
     if (stillMissing.length) {
-      for (const r of await igTabCollect(stillMissing, onProgress)) {
+      /* and each page-route account lands as it finishes, for the same reason */
+      await igTabCollect(stillMissing, onProgress, r => {
         const apiNote = (igResults.get(r.channelId) || {}).note || "";
         /* carry why the cheap route failed into the note either way — when the page route saves the
            run that is worth knowing, and when both fail the report needs both reasons, not one */
-        igResults.set(r.channelId, Object.assign({}, r, {
+        emit(Object.assign({}, r, {
           note: r.note + (apiNote ? ` · api route first said: ${apiNote}` : ""),
         }));
-      }
+      });
     }
-    for (const c of igChannels) if (igResults.has(c.id)) results.push(igResults.get(c.id));
   }
 
   /* ---- facebook, one tab per Page ---- */
@@ -1386,7 +1425,7 @@ async function collect(channels, onProgress) {
         : ` · no captions could be read [${capLog.join(" ") || "nothing tried"}] — ` +
           `content matching cannot judge this channel, so it reports unknown rather than missing`;
 
-      results.push({
+      emit({
         channelId: c.id, platform: "facebook", username: c.username,
         ok: true, suggested: false,
         posts: fetched.posts,
@@ -1443,7 +1482,7 @@ async function collect(channels, onProgress) {
             `too incomplete to count · HTML routes: ${fetchSummary || "none"}`
           : `${r.todayCount} today of ${r.visibleCount} visible` +
             (r.unknownCount ? `, ${r.unknownCount} undated` : "");
-      results.push({
+      emit({
         channelId: c.id, platform: "facebook", username: c.username,
         ok: !!(r && r.ok),
         note,
@@ -1464,7 +1503,7 @@ async function collect(channels, onProgress) {
         source: "extension-facebook",
       });
     } catch (e) {
-      results.push({ channelId: c.id, platform: "facebook", username: c.username,
+      emit({ channelId: c.id, platform: "facebook", username: c.username,
                      ok: false, note: String((e && e.message) || e),
                      todayCount: 0, visibleCount: 0, unknownCount: 0,
                      /* an error is not a measurement either — file nothing */
@@ -1479,15 +1518,70 @@ async function collect(channels, onProgress) {
   /* put the user back where they were, whether or not a tab had to be brought forward */
   if (restoreTabId) await chrome.tabs.update(restoreTabId, { active: true }).catch(() => {});
 
+  /* ---- tiktok LAST, and only if the network can actually reach it ----
+     Deliberately the final thing attempted. On a network that blocks tiktok.com — which is where
+     this runs — a tab for it can never load, so it is guaranteed to spend the navigation timeout
+     and return nothing. Anything queued behind that pays for it, which is how a working Facebook
+     read came to be lost. Last in the order, and gated on a short reachability check, it can now
+     only ever cost itself. */
+  if (ttChannels.length) {
+    const reachable = await tiktokReachable();
+    if (!reachable.ok) {
+      for (const c of ttChannels)
+        emit({ channelId: c.id, platform: "tiktok",
+               username: String(c.username || c.handle || "").replace(/^@/, "").trim(),
+               ok: false, posts: [], source: "extension-tiktok",
+               note: "this browser's network cannot reach tiktok.com (" + reachable.why + ") — " +
+                     "nothing here can read TikTok until that changes, so the drop stays unknown " +
+                     "rather than being reported as missing" });
+    } else {
+      await ttCollect(ttChannels, onProgress, emit);
+    }
+  }
+
   return results;
+}
+
+/* Can this browser reach tiktok.com at all? A blocked network fails the connection outright, so a
+   short HEAD is enough to find out — and finding out costs a few seconds instead of a full
+   navigation timeout per channel. Never throws: anything other than a clear answer is treated as
+   unreachable, because attempting the tab is the expensive branch. */
+async function tiktokReachable() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    await fetch("https://www.tiktok.com/", { method: "HEAD", signal: ctl.signal, mode: "no-cors" });
+    return { ok: true, why: "" };
+  } catch (e) {
+    const aborted = e && (e.name === "AbortError" || /abort/i.test(String(e)));
+    return { ok: false, why: aborted ? "no answer in 6s" : String((e && e.message) || e).slice(0, 80) };
+  } finally { clearTimeout(timer); }
 }
 
 /* ═══════════════════ message API for the popup ═══════════════════ */
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg && msg.type === "collect") {
-    const tick = text => chrome.runtime.sendMessage({ type: "progress", text }).catch(() => {});
-    collect(msg.channels || [], tick)
+    /* Two different listeners, two different transports, and getting this wrong is invisible.
+       chrome.runtime.sendMessage reaches the extension's OWN pages — the popup — and never a
+       content script. bridge.js IS a content script, so anything sent that way to the dashboard
+       goes nowhere, and the rejection ("Receiving end does not exist") is swallowed by the catch.
+       That is how the per-channel streaming below came to be wired to a dead wire, and why the
+       mid-run progress toasts had in fact never once arrived.
+       The collect request comes FROM the bridge, so sender.tab.id is exactly the dashboard tab —
+       address it directly. Both transports are used: the tab for the page, runtime for the popup,
+       so whichever is driving the run gets its updates. */
+    const tabId = sender && sender.tab && sender.tab.id;
+    const toBoth = payload => {
+      if (tabId != null) chrome.tabs.sendMessage(tabId, payload).catch(() => {});
+      chrome.runtime.sendMessage(payload).catch(() => {});
+    };
+    const tick = text => toBoth({ type: "progress", text });
+    /* Every channel is handed over the moment it is read, not held until the end. The page files
+       each one immediately, so whatever has been collected survives even if the run is later cut
+       short by its deadline — which is what stopped one impossible channel wiping out the rest. */
+    const partial = result => toBoth({ type: "partial", result });
+    collect(msg.channels || [], tick, partial)
       .then(results => {
         const payload = { collectedAt: new Date().toISOString(), results };
         chrome.storage.local.set({ lastRun: payload });

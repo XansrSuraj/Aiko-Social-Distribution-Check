@@ -90,6 +90,37 @@ function run(handle, doc, location) {
     check(r.gridCodes === 3, "the grid's own links are counted as corroboration", r.gridCodes);
   }
 
+  /* ── Meta's real envelope: the post is SIXTEEN levels down ──────────────────
+     Instagram does not ship a shallow blob. Its profile page wraps the timeline in the Polaris
+     streaming envelope, which burns ten or eleven levels before any payload — and the walk charges
+     a level per array element as well as per key. An earlier depth cap of 14 meant this reader
+     could never reach a single real post on a live profile, while every fixture here (all about
+     ten levels deep) passed. That is the exact shape of bug a test suite is supposed to catch, so
+     the envelope is reproduced faithfully rather than approximated. */
+  {
+    const node = {
+      code: "DEEP01", taken_at: 1755003000, media_type: 2, product_type: "clips",
+      caption: { text: "buried sixteen levels down" }, play_count: 77, like_count: 5,
+      owner: { username: "sportsfc.vn" },
+    };
+    const envelope = {
+      require: [["ScheduledServerJS", "handle", null, [
+        { __bbox: { require: [["RelayPrefetchedStreamCache", "next", [], [
+          "adp_PolarisProfilePostsQueryRelayPreloader",
+          { __bbox: { result: { data: {
+            xdt_api__v1__feed__user_timeline_graphql_connection: { edges: [{ node }] },
+          } } } },
+        ]]] } },
+      ]]],
+    };
+    const r = await run("sportsfc.vn", pageWith([envelope]));
+    check(r.posts.length === 1 && r.posts[0].externalId === "DEEP01",
+      "a post inside Meta's real streaming envelope is still found",
+      JSON.stringify(r.posts.map(p => p.externalId)) + " diag=" + (r.diag || "-"));
+    check(r.posts.length === 1 && r.posts[0].kind === "reel",
+      "and it is still classified correctly at that depth", r.posts[0] && r.posts[0].kind);
+  }
+
   /* ── someone else's post riding along in the same payload ──────────────────── */
   {
     const doc = pageWith([

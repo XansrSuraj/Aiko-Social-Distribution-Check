@@ -1401,5 +1401,103 @@ console.log("\n── a channel nobody can read scores nothing, never zero");
   }
 }
 
+/* ═══════════════════ the coverage rule must not eat a channel it does not apply to ═══════════════════
+   A first attempt at the "never cross a drop the read could not have seen" rule deducted EVERY
+   blank cell from the target, "unseen" and "none" alike. That broke two whole modes, because a
+   count-mode channel has no cells of its own — it falls through to the hand-confirm branch, so all
+   of its drops read "none". The deduction therefore cancelled its entire target:
+     · a Facebook count of 5 against 5 drops went from "5/5" to a blank "—"
+     · a hand-typed count of 2 against 5 drops stopped reporting three missing posts AT ALL
+   The second is the serious one: a rule written to stop the report inventing misses started
+   erasing real ones, and permanently — the cells are "none" every run, so it never recovered. */
+console.log("\n── the coverage rule applies only where its reasoning holds");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
+    { id: "fbv", platform: "facebook", name: "Facebook · vn", lang: "vi" },
+  ];
+  const runC = setup => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    setup(c);
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+  /* five drops, so a count-mode channel has five "none" cells to be wrongly deducted */
+  const fiveDrops = c => {
+    c.posts = {
+      ytv: [P("y1", 300, VN_TEXT), P("y2", 240, VN_TEXT), P("y3", 180, VN_TEXT),
+            P("y4", 120, VN_TEXT), P("y5", 60, VN_TEXT)],
+      tgv: [P("t1", 301, VN_TEXT), P("t2", 241, VN_TEXT), P("t3", 181, VN_TEXT),
+            P("t4", 121, VN_TEXT), P("t5", 61, VN_TEXT)],
+    };
+    c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+               fbv: { ok: true, at: Date.now() } };
+  };
+  const today = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 }) && null;
+
+  /* a healthy count must survive untouched */
+  {
+    const rep = runC(c => {
+      fiveDrops(c);
+      const day = Object.keys(c.counts)[0];
+      c.counts = {};
+      for (const d of [M.contentDate ? null : null]) { /* date key filled below */ }
+      /* file the count under both dates the window can touch, the way countFor() looks it up */
+      const isoNow = new Date().toISOString(), isoThen = new Date(Date.now() - 86400e3).toISOString();
+      for (const iso of [isoNow, isoThen]) {
+        const dd = iso.slice(0, 10);
+        c.counts[dd] = c.counts[dd] || {};
+        c.counts[dd].fbv = { n: 5, source: "suggested", texts: [] };
+      }
+    });
+    const f = row(rep, "fbv");
+    ok(f.mode === "count", "the Facebook row is judged on its count", f.mode);
+    ok(f.status === "ok", "a count that matches the target is still ok, not blanked to unknown", f.status);
+    ok(f.expected === 5 && f.count === 5, "and it still reads 5/5", `${f.count}/${f.expected}`);
+  }
+
+  /* THE SERIOUS ONE: a real, hand-recorded shortfall must still be reported */
+  {
+    const rep = runC(c => {
+      fiveDrops(c);
+      c.counts = {};
+      for (const iso of [new Date().toISOString(), new Date(Date.now() - 86400e3).toISOString()]) {
+        const dd = iso.slice(0, 10);
+        c.counts[dd] = c.counts[dd] || {};
+        c.counts[dd].fbv = { n: 2, source: "manual", texts: [] };
+      }
+    });
+    const f = row(rep, "fbv");
+    ok(f.status === "short", "a hand-typed count of 2 against 5 drops is still SHORT", f.status);
+    ok(f.count === 2 && f.expected === 5, "and still reads 2/5, not a blank", `${f.count}/${f.expected}`);
+    ok(rep.alerts.some(a => a.kind === "missing" && a.id === "fbv"),
+      "and the missing-post alarm still names the three that did not go out");
+  }
+
+  /* and the deduction must never invent an "over" out of a measured, healthy run */
+  {
+    const CX = [
+      { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+      { id: "xvn", platform: "x",        name: "X · vn",        lang: "vi" },
+    ];
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 9 });
+    /* two drops; X posted twice in each, so its count (4) exceeds the drop count */
+    c.posts = {
+      ytv: [P("y1", 200, VN_TEXT), P("y2", 40, VN_TEXT)],
+      xvn: [P("x1", 201, VN_TEXT), P("x2", 202, VN_TEXT), P("x3", 41, VN_TEXT), P("x4", 42, VN_TEXT)],
+    };
+    c.meta = { ytv: { ok: true, at: Date.now() }, xvn: { ok: true, at: Date.now() } };
+    const rep = M.reconcile(CX, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 9 });
+    const x = row(rep, "xvn");
+    ok(x.status !== "unknown", "a channel with real posts is never reported as knowing nothing", x.status);
+    ok(x.count >= x.expected, "and its own count is never below the target it is held to",
+      `${x.count}/${x.expected}`);
+  }
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

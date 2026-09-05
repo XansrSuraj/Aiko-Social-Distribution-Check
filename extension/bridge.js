@@ -46,9 +46,15 @@ window.addEventListener("message", async ev => {
   }
 });
 
-/* relay progress so the page can show what is happening mid-run */
+/* relay progress so the page can show what is happening mid-run, and — more importantly — relay
+   each channel's result the moment it is ready. The page files a partial straight away, so a run
+   that is later cut short by its deadline still leaves behind everything it managed to read. A
+   slow or impossible channel can no longer take the working ones down with it. */
 chrome.runtime.onMessage.addListener(msg => {
   if (msg && msg.type === "progress") {
     window.postMessage({ [TAG]: "progress", text: msg.text }, window.origin);
+  }
+  if (msg && msg.type === "partial" && msg.result) {
+    window.postMessage({ [TAG]: "partial", result: msg.result }, window.origin);
   }
 });

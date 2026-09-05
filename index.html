@@ -903,7 +903,7 @@ function openModal(html, opt){
   if(f) setTimeout(() => f.focus(), 60);
   onEsc = onVeil = closeModal;
 }
-function closeModal(){ veil.classList.remove("on"); mo.innerHTML = ""; onEsc = onVeil = null; }
+function closeModal(){ veil.classList.remove("on"); mo.innerHTML = ""; onEsc = onVeil = null; dcRedraw = null; }
 veil.onclick = e => { if(e.target === veil && onVeil) onVeil(); };
 document.addEventListener("keydown", e => {
   if(e.key === "Escape" && onEsc) return onEsc();
@@ -1687,16 +1687,31 @@ function reconcile(channels, opt){
               .filter(x => x.d.lang && x.d.lang !== c.lang)
           : [];
 
-    /* Drops nothing here can speak to. Two ways that happens, and neither is evidence of a miss:
-         unseen  the read did not cover this drop (see the coverage note above)
-         none    there was nothing to judge it by at all — nobody has answered for a hand-confirm
-                 channel yet, or a content channel had no same-language caption to compare against
-       Both are excluded from the target, so a channel is never called short over a drop that was
-       never actually checked. This is what stopped a hand-confirm channel kept alive by stale
-       answers from showing a red "0/4" with every cell blank. */
-    const unjudged = cells.filter(x => x.state === "unseen" || x.state === "none").length;
+    /* What this channel can fairly be held to.
+       An earlier version of this deducted EVERY blank cell — "unseen" and "none" alike — from the
+       target, and that was badly wrong. A count-mode channel has no cells of its own (it falls
+       through to the hand-confirm branch, so every drop is "none"), which meant the deduction
+       cancelled its entire target: a Facebook count of 5 against 5 drops went from a healthy "5/5"
+       to a blank "—", and — far worse — a hand-typed count of 2 against 5 drops stopped reporting
+       three missing posts at all. The rule that was supposed to stop the report inventing misses
+       started erasing real ones, permanently rather than for one run.
+       So the deduction is now narrow and only applies where the reasoning actually holds:
+         timeline  one cell per expected post, so a drop the read could not cover (see the coverage
+                   note above) genuinely cannot be judged and comes off the target
+         confirm   only the drops a person has actually answered can be judged; the rest are not
+                   failures, they are unanswered
+         count     the number IS the evidence — it does not come from cells at all, so nothing about
+                   the cells may touch it
+         content   captions are matched against the whole window, never per covered drop */
     const unseenCount = cells.filter(x => x.state === "unseen").length;
-    const expectedHere = expected === null ? null : Math.max(0, expected - unjudged);
+    const answered = mode === "confirm"
+      ? cells.filter(x => x.state === "okh" || x.state === "miss").length : null;
+    const expectedHere = expected === null ? null
+      : mode === "confirm" ? answered
+      /* clamped at n so removing an unjudgeable drop can never push the target BELOW what was
+         actually found and invent an "over" out of a measured, healthy run */
+      : mode === "timeline" && unseenCount ? Math.max(n, Math.max(0, expected - unseenCount))
+      : expected;
 
     /* Viber (timefold) never sets anyone's target and is never "over". But it CAN flag a real miss:
        a drop the phone was online for and still forwarded no post reads "review" and raises a
@@ -1706,9 +1721,11 @@ function reconcile(channels, opt){
     const status = mode === "none" ? "unknown"
       : mode === "timefold" ? (maybeAt.length ? "review" : (n ? "seen" : "unknown"))
       : expectedHere === null ? "notarget"
-      /* every drop was outside what could be judged here — that is ignorance, not a clean run, and
-         calling it "ok" would be as false as calling it short */
-      : (expectedHere === 0 && unjudged > 0) ? "unknown"
+      /* Nothing here could be judged at all — that is ignorance, not a clean run, and calling it
+         "ok" would be as false as calling it short. Guarded by n === 0: a row that demonstrably
+         holds n posts knows something, and reporting it as knowing nothing is a contradiction that
+         once swallowed a real hand-recorded shortfall. */
+      : (expectedHere === 0 && n === 0 && (unseenCount > 0 || mode === "confirm")) ? "unknown"
       : n === expectedHere ? "ok" : n < expectedHere ? "short" : "over";
 
     if(maybeAt.length)
@@ -1954,7 +1971,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.2.0";
+const EXT_WANT = "1.3.0";
 let extVersion = null;
 const extStale = () => !!(extVersion && extVersion !== EXT_WANT);
 const extWaiters = new Map();               // request id -> resolve
@@ -1966,6 +1983,17 @@ addEventListener("message", ev => {
   if(!m || typeof m !== "object") return;
   if(m.__aiko === "ready"){ extReady = true; if(m.version) extVersion = String(m.version); return; }
   if(m.__aiko === "progress"){ if(m.text) toast(m.text, "loader"); return; }
+  /* One channel, finished and handed over mid-run. Filed immediately and on its own, so the run's
+     deadline can no longer destroy work that was already done: a slow or unreachable channel used
+     to take every successfully-read channel down with it when the wait ran out — which is how a
+     healthy Facebook read went blank because of TikTok. Whatever arrives is banked. */
+  if(m.__aiko === "partial"){
+    if(m.result && m.result.channelId){
+      absorbRun({ collectedAt:new Date().toISOString(), results:[m.result] });
+      if(dcRedraw){ try{ dcRedraw(); }catch(e){ /* a repaint failing must not lose the data */ } }
+    }
+    return;
+  }
   if(m.__aiko === "result"){
     const done = extWaiters.get(m.id);
     if(done){ extWaiters.delete(m.id); done(m); }
@@ -1974,14 +2002,36 @@ addEventListener("message", ev => {
 /* the bridge may have loaded before this listener existed, so ask */
 try{ postMessage({ __aiko:"request", action:"ping" }, location.origin); }catch(e){}
 
+/* Roughly what each platform can cost the extension in the worst case: Facebook opens several
+   entry points and scrolls each until the captions stop coming, Instagram may fall back from its
+   API to a full page navigation per account, X renders a real tab, TikTok is a short reachability
+   probe. A flat budget gave six channels the same allowance as one, which is how the wait came to
+   expire mid-run in the first place. */
+const EXT_COST_MS = { facebook:110000, instagram:50000, x:35000, tiktok:12000 };
+const extBudget = channels => 45000 +
+  channels.reduce((t, c) => t + (EXT_COST_MS[c.platform] || 30000), 0);
+
 function askExtension(channels, timeoutMs){
   return new Promise(resolve => {
     const id = "r" + (++extSeq);
     const timer = setTimeout(() => {
-      extWaiters.delete(id);
-      resolve({ ok:false, error:"the extension did not answer in time" });
-    }, timeoutMs || 180000);
-    extWaiters.set(id, m => { clearTimeout(timer); resolve(m); });
+      /* Give up WAITING, but never stop listening. The waiter used to be deleted here, so when the
+         extension finally answered — carrying every channel it had read, Facebook included — the
+         page looked the id up, found nothing, and dropped the whole run on the floor. The caller
+         is released so the UI is not stuck, and a late reply is still absorbed when it lands. */
+      extWaiters.set(id, m => {
+        extWaiters.delete(id);
+        if(m && m.ok && m.run){
+          const n = absorbRun(m.run);
+          toast(`the extension finished late — filed ${n} late result(s)`, "check-check");
+          if(dcRedraw){ try{ dcRedraw(); }catch(e){} }
+        }
+      });
+      resolve({ ok:false, late:true,
+                error:"the extension is still working — whatever it has already read has been filed, " +
+                      "and the rest will be filed when it finishes" });
+    }, timeoutMs || extBudget(channels || []));
+    extWaiters.set(id, m => { clearTimeout(timer); extWaiters.delete(id); resolve(m); });
     postMessage({ __aiko:"request", action:"collect", id, channels }, location.origin);
   });
 }
@@ -2096,7 +2146,10 @@ async function runEverything(o){
   toast(`Asking the extension for ${browserChans.length} channel(s)…`, "loader");
   const res = await askExtension(browserChans);
   if(!res.ok){
-    toast("Extension: " + (res.error || "failed"), "triangle-alert");
+    /* A run that overran its budget is not a failed run. Each channel was filed as it arrived, and
+       a late reply is still absorbed when it lands, so this is a note rather than an alarm — it
+       used to be the point at which every already-collected channel was thrown away. */
+    toast("Extension: " + (res.error || "failed"), res.late ? "loader" : "triangle-alert");
     return;
   }
   absorbRun(res.run);
@@ -2301,6 +2354,11 @@ function downloadReportCard(rep, o, wo){
     img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
   }catch(e){ toast("Download failed: " + (e.message || e), "triangle-alert"); }
 }
+
+/* The open report's redraw, so a channel arriving mid-run can repaint the matrix it belongs to.
+   Results now stream in one at a time, and watching them fill in is the difference between a
+   report that looks stuck and one that is visibly working. Cleared when the modal closes. */
+let dcRedraw = null;
 
 function dailyCheckModal(o){
   const draw = () => {
@@ -2928,6 +2986,9 @@ function dailyCheckModal(o){
     };
   };
   draw();
+  /* published so a channel handed over mid-run repaints straight away. closeModal() drops it, so a
+     stale closure is never called against a modal that is no longer on screen. */
+  dcRedraw = draw;
 }
 
 /* ═══════════════════ render ═══════════════════ */

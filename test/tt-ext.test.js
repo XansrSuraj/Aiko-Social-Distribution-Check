@@ -12,7 +12,9 @@ const path = require("path");
 
 const SRC = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const START = "function ttScrape(handle) {";
-const END = "async function ttCollect(channels, onProgress) {";
+/* anchored on the name alone — the signature has already gained a parameter once, and a marker
+   that pins the whole argument list turns an ordinary refactor into a mystery test failure */
+const END = "async function ttCollect(";
 const a = SRC.indexOf(START), b = SRC.indexOf(END);
 if (a === -1 || b === -1) { console.error("FAIL  could not find ttScrape's bounds in background.js"); process.exit(1); }
 const body = SRC.slice(a, b);
