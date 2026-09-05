@@ -2509,8 +2509,16 @@ function dailyCheckModal(o){
             : `<span class="dc-pill ${r.suggested ? "guess" : r.status === "ok" ? "ok"
                 : r.status === "short" ? "short" : "sg"}"${
                 r.suggested ? ' title="read off the page — confirm it below"' : ""}>${r.count}/${r.expected}</span>`;
+          /* A blank row's reason was a generic label — "not collected" — while the reader's OWN
+             account of what happened sat unread in meta.note: "a login prompt is showing, the
+             browser is not logged into x.com", "Apify credits are used up", "this account is
+             private". That note is the single most useful line in the report for a channel showing
+             nothing, and hiding it meant every blank row looked identical whether the cause was a
+             missing login, an exhausted quota or a dead link. It is shown first now, with the
+             generic label kept only for when there is no note at all. */
           const why = r.mode === "none"
             ? (meta.dead ? "link is dead" : meta.unsupported ? "not supported"
+               : meta.note ? meta.note
                : r.platform === "facebook" && (checks.posts[r.id] || []).length
                  ? "no captions to match on — its dates cannot prove absence"
                : meta.browserRequired ? "run the extension" : "not collected")

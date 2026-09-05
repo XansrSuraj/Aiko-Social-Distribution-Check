@@ -1203,13 +1203,54 @@ function ttScrape(handle) {
     };
   }).filter(Boolean);
 
+  /* ── the rendered grid, when the script tags are empty ──────────────────────
+     Which they usually are. The blob above is only populated when TikTok server-renders the
+     profile; in a real browser it commonly ships an empty itemList and fills the grid from its own
+     XHR after load. A probe from two networks measured exactly that — HTTP 200, both script tags
+     present, zero items in each — so a reader that stopped here would return nothing even once the
+     network could reach TikTok at all.
+     The grid itself is enough, because a TikTok video id IS its timestamp: the id is a snowflake
+     whose top 32 bits are the unix second it was created. So a link is a post AND its instant, with
+     no API, no signing and nothing to parse but the href. */
+  if (!posts.length) {
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href*="/video/"]')) {
+      const href = a.getAttribute("href") || "";
+      const m = href.match(/\/@([\w.\-]+)\/video\/(\d{6,25})/);
+      if (!m) continue;
+      if (wanted && m[1].toLowerCase() !== wanted) continue;   // a recommended clip from another account
+      const id = m[2];
+      if (seen.has(id)) continue;
+      seen.add(id);
+      let ts = "";
+      try {
+        const secs = Number(BigInt(id) >> 32n);
+        if (isFinite(secs) && secs > 1e9 && secs < 4e9) ts = new Date(secs * 1000).toISOString();
+      } catch (e) { /* not a snowflake — then it cannot be dated, and an undated post is no use */ }
+      if (!ts) continue;
+      /* the description rides on the cover image's alt text */
+      const img = a.querySelector("img");
+      posts.push({
+        externalId: id, ts, kind: "video",
+        text: (img && (img.getAttribute("alt") || "")) || "",
+        views: null, likes: null, comments: null, reposts: null, duration: null,
+        thumb: (img && img.getAttribute("src")) || "",
+        permalink: "https://www.tiktok.com/@" + m[1] + "/video/" + id,
+      });
+    }
+    tried.push("grid:" + posts.length);
+    posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  }
+
   const bodyText = (document.body && document.body.innerText || "").slice(0, 4000);
   let diag = "";
   if (!posts.length) {
     if (/verify to continue|select 2 objects|are you a human/i.test(bodyText)) diag = "TikTok showed a bot-check wall instead of the profile";
     else if (/couldn.t find this account/i.test(bodyText)) diag = "TikTok says this account does not exist";
+    else if (/log in to tiktok|sign up for tiktok/i.test(bodyText) && !/\/video\//.test(document.body.innerHTML || ""))
+      diag = "TikTok is showing a login wall instead of the profile grid";
     else if (raw.length && !posts.length) diag = "posts were on the page but none matched @" + handle + " (" + tried.join(", ") + ")";
-    else diag = "no video data was embedded in the page (" + tried.join(", ") + ")";
+    else diag = "neither the embedded data nor the rendered grid had a video (" + tried.join(", ") + ")";
   }
   return { posts, tried, diag };
 }
@@ -1227,8 +1268,18 @@ async function ttCollect(channels, onProgress, onResult) {
       const tab = await chrome.tabs.create({ url: "https://www.tiktok.com/@" + encodeURIComponent(handle), active: false });
       tabId = tab.id;
       await waitForLoad(tabId);
-      const res = await runInTab(tabId, ttScrape, [handle]);
-      const posts = (res && res.posts) || [];
+      /* "complete" only means the document finished loading — TikTok fills its grid from its own
+         XHR afterwards, so the first read is routinely too early. Re-read a few times rather than
+         reporting an empty profile that is merely still arriving. */
+      let res = null, posts = [];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        res = await runInTab(tabId, ttScrape, [handle]);
+        posts = (res && res.posts) || [];
+        if (posts.length) break;
+        /* a bot wall or a dead handle will not improve by waiting */
+        if (res && res.diag && /bot-check|does not exist|login wall/.test(res.diag)) break;
+        await new Promise(r => setTimeout(r, 1500));
+      }
       if (!posts.length) throw new Error("TikTok rendered no posts for @" + handle + " — treat as unknown, not empty." +
         (res && res.diag ? " (" + res.diag + ")" : ""));
       posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));

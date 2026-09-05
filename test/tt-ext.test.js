@@ -25,12 +25,19 @@ const check = (good, label, extra) => {
   console.log(`  ${good ? "pass" : "FAIL"}  ${label}${extra ? "  — " + extra : ""}`);
 };
 
-/* a stub document exposing exactly the two script tags ttScrape reads, plus body.innerText for the
-   bot-check/dead-account diagnosis path */
-function docWith(scripts, bodyText) {
+/* a stub document exposing the two script tags ttScrape reads, the rendered grid it falls back to,
+   and body.innerText for the bot-check/dead-account diagnosis path */
+function docWith(scripts, bodyText, gridHrefs, alts) {
+  const links = (gridHrefs || []).map((h, i) => ({
+    getAttribute: k => (k === "href" ? h : null),
+    querySelector: () => ((alts && alts[i] !== undefined)
+      ? { getAttribute: k => (k === "alt" ? alts[i] : k === "src" ? "https://p16/c" + i + ".jpg" : null) }
+      : null),
+  }));
   return {
     getElementById: id => (id in scripts ? { textContent: JSON.stringify(scripts[id]) } : null),
-    body: { innerText: bodyText || "" },
+    querySelectorAll: sel => (/\/video\//.test(sel) ? links : []),
+    body: { innerText: bodyText || "", innerHTML: (gridHrefs || []).join(" ") },
   };
 }
 
@@ -110,6 +117,51 @@ function run(handle, doc) {
       JSON.stringify(r.posts.map(p => p.text)));
   }
 
+  /* ── the rendered grid, which is what a real browser actually gives ──────────
+     TikTok commonly ships an EMPTY itemList and fills the grid from its own XHR after load — a
+     probe from two networks measured exactly that, so a reader that only parsed the script tags
+     returned nothing even when the network could reach TikTok perfectly well. The grid alone is
+     enough, because a TikTok video id is a snowflake whose top 32 bits are the unix second it was
+     created: the href IS the post and its instant. */
+  {
+    const doc = docWith(
+      /* the script tag is present but empty, exactly as measured live */
+      { __UNIVERSAL_DATA_FOR_REHYDRATION__: { __DEFAULT_SCOPE__: { "webapp.user-detail": { userInfo: { itemList: [] } } } } },
+      "",
+      ["/@sportsfc.fans/video/7300000000000000000",
+       "/@sportsfc.fans/video/7460000000000000000",
+       "/@sportsfc.fans/video/7300000000000000000",          // the same clip linked twice on the page
+       "/@someone.else/video/7455555555555555555"],           // a recommended clip from another account
+      ["bàn thắng đẹp", "highlight", "bàn thắng đẹp", "not ours"]);
+    const r = run("sportsfc.fans", doc);
+    check(r.posts.length === 2, "the grid is read when the embedded blob is empty", r.posts.length);
+    check(r.posts.every(p => p.externalId !== "7455555555555555555"),
+      "another account's recommended clip is not counted for this channel",
+      JSON.stringify(r.posts.map(p => p.externalId)));
+    check(r.posts[0].externalId === "7460000000000000000", "newest first", r.posts.map(p => p.externalId).join(","));
+    check(r.posts[0].ts === "2025-01-15T04:50:01.000Z",
+      "the instant is derived from the id's snowflake, so no API is needed for the date", r.posts[0].ts);
+    check(r.posts[1].text === "bàn thắng đẹp", "the caption comes off the cover image's alt text", r.posts[1].text);
+    check(r.posts[1].permalink === "https://www.tiktok.com/@sportsfc.fans/video/7300000000000000000",
+      "and the permalink is rebuilt in full", r.posts[1].permalink);
+    check(r.posts.every(p => p.views === null),
+      "counts the grid does not carry stay null — never a fabricated zero");
+  }
+
+  /* the embedded blob still wins when it IS populated — it is strictly richer than the grid */
+  {
+    const doc = docWith(
+      { __UNIVERSAL_DATA_FOR_REHYDRATION__: { __DEFAULT_SCOPE__: { "webapp.user-detail": { itemList: [
+        { id: "7300000000000000000", createTime: 1755000000, desc: "from the blob",
+          author: { uniqueId: "sportsfc.fans" }, stats: { playCount: 999 }, video: { duration: 9 } },
+      ] } } } },
+      "", ["/@sportsfc.fans/video/7460000000000000000"], ["from the grid"]);
+    const r = run("sportsfc.fans", doc);
+    check(r.posts.length === 1 && r.posts[0].text === "from the blob",
+      "the richer embedded data is preferred over the grid", JSON.stringify(r.posts.map(p => p.text)));
+    check(r.posts[0].views === 999, "so the counts it carries are kept", r.posts[0].views);
+  }
+
   /* ── nothing embedded at all: named as a bot-check wall or a dead handle, not silence ── */
   {
     const wall = run("sportsfc.fans", docWith({}, "Verify to continue: select 2 objects that match"));
@@ -119,7 +171,8 @@ function run(handle, doc) {
     check(!dead.posts.length && /does not exist/.test(dead.diag), "a dead handle is named as such", dead.diag);
 
     const empty = run("sportsfc.fans", docWith({}, "just an ordinary empty page"));
-    check(!empty.posts.length && /no video data/.test(empty.diag), "an unrecognised empty page still gets a plain, honest diagnostic",
+    check(!empty.posts.length && /neither the embedded data nor the rendered grid/.test(empty.diag),
+      "an unrecognised empty page still gets a plain, honest diagnostic naming BOTH routes tried",
       empty.diag);
   }
 
