@@ -1201,5 +1201,205 @@ console.log("\n── viber never invents a drop and never accuses");
   }
 }
 
+/* ═══════════════════ a cross only inside what the read covered ═══════════════════
+   From a real false alarm: X was read, the day's last reel went out a few minutes AFTER that read,
+   and the report crossed the channel for it — a post that was sitting on the profile the whole
+   time. A cross is a factual claim ("this did not go out"), so it may only be made about the
+   stretch of time the read could actually see. Outside it the honest answer is "not seen yet",
+   and the next run judges the drop normally.
+
+   The danger in fixing this is over-correcting into silence, so the second case here is the one
+   that matters most: a genuine miss, well inside the covered stretch, must still cross. */
+console.log("\n── a cross is only ever made about what the read covered");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
+    { id: "xvn", platform: "x",        name: "X · vn",        lang: "vi" },
+  ];
+  const runC = setup => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    setup(c);
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+  const minsAgo = m => Date.now() - m * 60e3;
+
+  /* two drops: one 200 minutes ago, one 10 minutes ago. X posted in the older one only, and X was
+     last read 40 minutes ago — so the recent drop went out long after anyone looked at X. */
+  {
+    const rep = runC(c => {
+      c.posts = {
+        ytv: [P("y1", 200, VN_TEXT), P("y2", 10, VN_TEXT)],
+        tgv: [P("t1", 201, VN_TEXT), P("t2", 11, VN_TEXT)],
+        xvn: [P("x1", 202, VN_TEXT)],
+      };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 xvn: { ok: true, at: minsAgo(40) } };
+    });
+    const x = row(rep, "xvn");
+    const states = x.cells.map(cl => cl.state).join(",");
+    ok(states === "ok,unseen", "a drop that went out after the channel was read is 'not seen', never a cross", states);
+    ok(x.unseenCount === 1, "the unjudged drop is counted as such", String(x.unseenCount));
+    ok(x.status === "ok", "and the channel is not called short for it", x.status);
+    ok(x.expected === 1 && x.expectedAll === 2,
+      "the target drops to what the read could be checked against, while the day's full target is kept",
+      `expected=${x.expected} all=${x.expectedAll}`);
+    ok(!rep.alerts.some(a => a.kind === "missing" && a.id === "xvn"),
+      "no missing-post alarm is raised for a drop nobody looked for");
+    ok(rep.alerts.some(a => a.kind === "unseen" && a.id === "xvn"),
+      "but it is named, so an unjudged drop is never mistaken for a clean run");
+    const slot = rep.slots[rep.slots.length - 1];
+    ok(slot.missing.indexOf("xvn") === -1, "and the drop itself does not list the channel as missing",
+      JSON.stringify(slot.missing));
+  }
+
+  /* THE GUARD: the same shape, except X was read AFTER both drops. Now silence really is evidence,
+     and the cross has to come back — a fix that made every miss disappear would be worse than the
+     bug it replaced. */
+  {
+    const rep = runC(c => {
+      c.posts = {
+        ytv: [P("y1", 200, VN_TEXT), P("y2", 30, VN_TEXT)],
+        tgv: [P("t1", 201, VN_TEXT), P("t2", 31, VN_TEXT)],
+        xvn: [P("x1", 202, VN_TEXT)],
+      };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 xvn: { ok: true, at: Date.now() } };
+    });
+    const x = row(rep, "xvn");
+    const states = x.cells.map(cl => cl.state).join(",");
+    ok(states === "ok,miss", "a genuine miss inside the covered stretch still crosses", states);
+    ok(x.status === "short", "and the channel is still reported short", x.status);
+    ok(rep.alerts.some(a => a.kind === "missing" && a.id === "xvn"),
+      "the missing-post alarm still fires for a real gap");
+  }
+
+  /* the far end: X hands over as few as three posts, so a drop older than anything it returned was
+     never examined either */
+  {
+    const rep = runC(c => {
+      c.posts = {
+        ytv: [P("y1", 600, VN_TEXT), P("y2", 60, VN_TEXT)],
+        tgv: [P("t1", 601, VN_TEXT), P("t2", 61, VN_TEXT)],
+        /* X's read reached back only about an hour — the 600-minute drop predates everything it
+           returned, so that drop was never examined here at all */
+        xvn: [P("x2", 62, VN_TEXT)],
+      };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 xvn: { ok: true, at: Date.now() } };
+    });
+    const x = row(rep, "xvn");
+    const states = x.cells.map(cl => cl.state).join(",");
+    ok(states === "unseen,ok", "a drop older than the read reached back is 'not seen', never a cross", states);
+    ok(x.status === "ok", "and it is not held against the channel", x.status);
+    ok(x.partial === true, "the read is marked partial so the caveat is available to the report", String(x.partial));
+  }
+
+  /* a channel read before the window even began still judges nothing it could not see, and a
+     channel with no read time at all falls back to the run's own clock rather than crossing wildly */
+  {
+    const rep = runC(c => {
+      c.posts = {
+        ytv: [P("y2", 5, VN_TEXT)],
+        tgv: [P("t2", 6, VN_TEXT)],
+        xvn: [P("x9", 400, VN_TEXT)],
+      };
+      /* no `at` recorded for xvn at all */
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() }, xvn: { ok: true } };
+      c.lastRun = new Date(minsAgo(120)).toISOString();
+    });
+    const x = row(rep, "xvn");
+    const states = x.cells.map(cl => cl.state).join(",");
+    ok(states.indexOf("miss") === -1,
+      "with no read time recorded, the run's own clock is used and a later drop is still not crossed", states);
+  }
+}
+
+/* ═══════════════════ an unreadable channel scores nothing, not zero ═══════════════════
+   From the live report: TikTok cannot be read at all (Apify out of credit, and the network blocks
+   tiktok.com outright), yet it showed a red "0/4" — a flat claim that every drop was missed — while
+   every one of its cells was blank. The cause was hand-answers left over from an EARLIER run: they
+   are keyed by the drop's exact instant, so once the drops move they match nothing, but they still
+   held the channel in hand-confirm mode where unanswered drops were counted as delivered-none.
+   Nothing was known about that channel, and "0/4" is not what nothing looks like. */
+console.log("\n── a channel nobody can read scores nothing, never zero");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
+    { id: "ttv", platform: "tiktok",   name: "TikTok · vn",   lang: "vi" },
+  ];
+  const runC = setup => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.confirms = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    setup(c);
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+
+  {
+    const rep = runC(c => {
+      c.posts = { ytv: [P("y1", 200, VN_TEXT), P("y2", 20, VN_TEXT)],
+                  tgv: [P("t1", 201, VN_TEXT), P("t2", 21, VN_TEXT)],
+                  ttv: [] };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 ttv: { ok: false, note: "Apify credits used up", at: Date.now() } };
+      /* answers from an earlier run, keyed to drops that no longer exist */
+      c.confirms = { ttv: { "2026-08-30T04:00:00.000Z": true, "2026-08-30T09:00:00.000Z": true } };
+    });
+    const t = row(rep, "ttv");
+    ok(t.cells.every(cl => cl.state !== "miss"), "not one drop is crossed on a channel nobody could read",
+      t.cells.map(cl => cl.state).join(","));
+    ok(t.status === "unknown", "the row reads unknown, not short", t.status);
+    ok(t.expected === 0 && t.expectedAll === 2,
+      "it is held to nothing, while the day's real target is still known",
+      `expected=${t.expected} all=${t.expectedAll}`);
+    ok(!rep.alerts.some(a => a.kind === "missing" && a.id === "ttv"),
+      "and no missing-post alarm is raised against it");
+    ok(rep.slots.every(s => s.missing.indexOf("ttv") === -1),
+      "no drop lists it as missing either", JSON.stringify(rep.slots.map(s => s.missing)));
+  }
+
+  /* the flip side: once a person DOES answer, their answers are honoured exactly */
+  {
+    const rep = runC(c => {
+      c.posts = { ytv: [P("y1", 200, VN_TEXT), P("y2", 20, VN_TEXT)],
+                  tgv: [P("t1", 201, VN_TEXT), P("t2", 21, VN_TEXT)],
+                  ttv: [] };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 ttv: { ok: false, at: Date.now() } };
+      const rep0 = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+      /* answer the FIRST drop only: it went out, and the second is still unanswered */
+      c.confirms = { ttv: { [rep0.slots[0].at]: true } };
+    });
+    const t = row(rep, "ttv");
+    const states = t.cells.map(cl => cl.state).join(",");
+    ok(states === "okh,none", "an answered drop is ticked and an unanswered one stays blank", states);
+    ok(t.count === 1 && t.expected === 1,
+      "the channel is judged only on the drop that was actually answered",
+      `count=${t.count} expected=${t.expected}`);
+    ok(t.status === "ok", "so answering truthfully does not make the row look short", t.status);
+  }
+
+  /* and a person saying "no, it did not go out" is still a real, reported miss */
+  {
+    const rep = runC(c => {
+      c.posts = { ytv: [P("y1", 200, VN_TEXT), P("y2", 20, VN_TEXT)],
+                  tgv: [P("t1", 201, VN_TEXT), P("t2", 21, VN_TEXT)],
+                  ttv: [] };
+      c.meta = { ytv: { ok: true, at: Date.now() }, tgv: { ok: true, at: Date.now() },
+                 ttv: { ok: false, at: Date.now() } };
+      const rep0 = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+      c.confirms = { ttv: { [rep0.slots[0].at]: true, [rep0.slots[1].at]: false } };
+    });
+    const t = row(rep, "ttv");
+    const states = t.cells.map(cl => cl.state).join(",");
+    ok(states === "okh,miss", "a hand-answered miss is still a cross", states);
+    ok(t.status === "short", "and still reported short", t.status);
+  }
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1523,6 +1523,36 @@ function reconcile(channels, opt){
        other channels define — the ones that DON'T line up with a drop are Viber's repeat "you have
        a message" reminders, not new posts, and are ignored entirely. */
 
+    /* ── how much of this window the read actually covered ──────────────────
+       A cross says "this channel did not post". That claim is only honest for the stretch of time
+       the read could actually see, and for a timeline channel that stretch has BOTH ends open:
+
+         · the far end — sources reach back wildly different distances. Telegram hands over about
+           twenty posts and YouTube fifteen, which span days; X gives as few as three. If the
+           oldest post we hold is itself inside the window, we never looked past it, so a drop
+           older than that was never examined.
+         · the near end — the read happened at a moment. A drop that went out AFTER we looked
+           cannot possibly be in it. This is the one that produced a live false cross: X was read,
+           the day's last reel went out afterwards, and the report called it missing.
+
+       Outside that stretch the answer is "not seen", never "✗". Note this only ever DEFERS the
+       judgement — the next run reads again with the drop safely inside the covered span and
+       judges it normally, so a real miss is delayed, never hidden. */
+    const all = checks.posts[c.id] || [];
+    const oldestRead = all.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity);
+    /* content matching sidesteps this entirely — it never depended on covering the window */
+    const partial = mode === "timeline" && all.length > 0 && oldestRead > from;
+    const readAt = typeof meta.at === "number" ? meta.at
+                 : (checks.lastRun ? new Date(checks.lastRun).getTime() : Date.now());
+    /* A post is not always visible the instant it is published — feeds propagate, and some readers
+       serve a short cache (X's is about ten minutes). Judging right up to the read time would turn
+       that lag into a cross, so the last few minutes before the read are given the benefit of the
+       doubt too. Kept deliberately small: it defers one run's verdict, nothing more. */
+    const SETTLE_MS = 10 * 60e3;
+    const coveredFrom = partial ? oldestRead : -Infinity;
+    const coveredTo = readAt + SETTLE_MS;
+    const outsideRead = at => at < coveredFrom || at > coveredTo;
+
     let cells;
     if(mode === "content"){
       /* Matched on words, not time. Only ever against a reference in this channel's own language:
@@ -1577,7 +1607,17 @@ function reconcile(channels, opt){
     }else if(mode === "timeline"){
       cells = slots.map(s => {
         const mine = s.posts.filter(p => p.channelId === c.id);
-        if(!mine.length) return { state:"miss", post:null };
+        if(!mine.length){
+          /* nothing here from this channel — but only call that a miss if the read could have
+             seen it at all (see the coverage note above) */
+          const at = new Date(s.at).getTime();
+          if(outsideRead(at))
+            return { state:"unseen", post:null,
+                     why: at > coveredTo
+                       ? "this drop went out after the channel was last read, so it could not have been seen yet"
+                       : `the read reached back only to ${hhmm(new Date(oldestRead).toISOString(), tz)}, so this drop was never examined` };
+          return { state:"miss", post:null };
+        }
         const bad = mine.find(p => {
           const d = detectLang(p.text);
           return c.lang && d.lang && d.lang !== c.lang;
@@ -1621,6 +1661,8 @@ function reconcile(channels, opt){
         const v = confirmOf(c.id, s.at);
         if(v === true)  return { state:"okh", post:null, at:s.at, askable };
         if(v === false) return { state:"miss", post:null, byHand:true, at:s.at, askable };
+        /* Nobody has answered for this drop, so nothing is known about it. Blank, never a cross —
+           and, just as importantly, never scored as one either: see the target below. */
         return { state:"none", post:null, at:s.at, askable };
       });
     }
@@ -1645,16 +1687,16 @@ function reconcile(channels, opt){
               .filter(x => x.d.lang && x.d.lang !== c.lang)
           : [];
 
-    /* Sources differ wildly in how far back they reach: Telegram hands over about twenty posts
-       and YouTube fifteen, which span days, X as few as three and rarely more than about ten,
-       while Facebook's page embeds only a handful. If a channel's oldest known post is itself
-       inside the window, the window was never covered end to end — so a short count might mean
-       nothing was posted, or might mean we never looked that far. Say which, rather than raising
-       a missing-post alarm on a guess. */
-    const all = checks.posts[c.id] || [];
-    const oldest = all.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity);
-    /* content matching sidesteps this entirely — it never depended on covering the window */
-    const partial = mode === "timeline" && all.length > 0 && oldest > from;
+    /* Drops nothing here can speak to. Two ways that happens, and neither is evidence of a miss:
+         unseen  the read did not cover this drop (see the coverage note above)
+         none    there was nothing to judge it by at all — nobody has answered for a hand-confirm
+                 channel yet, or a content channel had no same-language caption to compare against
+       Both are excluded from the target, so a channel is never called short over a drop that was
+       never actually checked. This is what stopped a hand-confirm channel kept alive by stale
+       answers from showing a red "0/4" with every cell blank. */
+    const unjudged = cells.filter(x => x.state === "unseen" || x.state === "none").length;
+    const unseenCount = cells.filter(x => x.state === "unseen").length;
+    const expectedHere = expected === null ? null : Math.max(0, expected - unjudged);
 
     /* Viber (timefold) never sets anyone's target and is never "over". But it CAN flag a real miss:
        a drop the phone was online for and still forwarded no post reads "review" and raises a
@@ -1663,8 +1705,11 @@ function reconcile(channels, opt){
       ? cells.map((x, i) => x.state === "maybe" && slots[i] ? slots[i].time : null).filter(Boolean) : [];
     const status = mode === "none" ? "unknown"
       : mode === "timefold" ? (maybeAt.length ? "review" : (n ? "seen" : "unknown"))
-      : expected === null ? "notarget"
-      : n === expected ? "ok" : n < expected ? "short" : "over";
+      : expectedHere === null ? "notarget"
+      /* every drop was outside what could be judged here — that is ignorance, not a clean run, and
+         calling it "ok" would be as false as calling it short */
+      : (expectedHere === 0 && unjudged > 0) ? "unknown"
+      : n === expectedHere ? "ok" : n < expectedHere ? "short" : "over";
 
     if(maybeAt.length)
       alerts.push({ kind:"maybe", id:c.id, name:c.name,
@@ -1703,9 +1748,10 @@ function reconcile(channels, opt){
 
     const missedAt = slots.filter(s => s.missing.indexOf(c.id) !== -1).map(s => s.time);
 
-    /* The gap is still reported as a gap — downgrading it would hide real misses, which is the
-       whole point of the tool. The caveat rides along instead, so the reader knows whether the
-       window was actually covered end to end before acting on it. */
+    /* A gap inside the covered stretch is still reported as a gap — downgrading that would hide
+       real misses, which is the whole point of the tool. What is no longer reported as a gap is a
+       drop the read could not have seen; those were taken out of the target above and are named
+       here instead, so the reader can tell "did not post" from "not looked at yet". */
     if(status === "short"){
       /* For a caption-matched channel (Facebook, Instagram) spell out the evidence the user asked
          for: which drop the reel did not go out on, and exactly how many of the drop's words its
@@ -1715,12 +1761,19 @@ function reconcile(channels, opt){
             ? `${slots[i].time}: reel not found — only ${x.match.matched}/${x.match.total} words matched` : null).filter(Boolean)
         : [];
       alerts.push({ kind:"missing", id:c.id, name:c.name, partial,
-        text:`${expected - n} post${expected - n === 1 ? "" : "s"} missing` +
+        text:`${expectedHere - n} post${expectedHere - n === 1 ? "" : "s"} missing` +
              (missedAt.length ? ` — nothing at ${missedAt.join(", ")}` : "") +
              (wordDetail.length ? ` · ${wordDetail.join("; ")}` : "") +
              (partial ? ` · only ${all.length} post(s) could be read here and none predate the ` +
                         `window, so part of it was never seen` : "") });
     }
+    /* Not an alarm — a note, so an unjudged drop is never silently mistaken for a clean run */
+    if(unseenCount)
+      alerts.push({ kind:"unseen", id:c.id, name:c.name,
+        text:`${unseenCount} drop${unseenCount === 1 ? "" : "s"} could not be judged here — ` +
+             cells.filter(x => x.state === "unseen" && x.why)
+                  .map((x, i) => x.why).slice(0, 1).join("") +
+             `. It will be checked on the next run rather than counted against this channel.` });
     if(mode !== "none" && !foldsByTime(c) && n > maxPer)
       alerts.push({ kind:"over", id:c.id, name:c.name,
         text:`${n} posts in ${hours}h — over the ${maxPer} you would expect at most` });
@@ -1734,7 +1787,11 @@ function reconcile(channels, opt){
       alerts.push({ kind:"dead", id:c.id, name:c.name, text:"channel not found — fix the link" });
 
     return { id:c.id, name:c.name, platform:c.platform, lang:c.lang, mode,
-             count:n, expected, status, cells, langIssues, missedAt, partial,
+             /* `expected` is what this channel can fairly be held to — drops its read could not
+                cover are not part of it, so the badge never reads "3/4" for a drop nobody looked
+                at. `expectedAll` keeps the day's full target for anything that needs it. */
+             count:n, expected:expectedHere, expectedAll:expected, unseenCount,
+             status, cells, langIssues, missedAt, partial,
              suggested: mode === "count" && countFor(c.id).source === "suggested" };
   });
 
@@ -1744,6 +1801,19 @@ function reconcile(channels, opt){
      that they are known. Kept separate as `byContent` so the report can still say which channels
      were confirmed by caption rather than by time. */
   for(const r of rows){
+    /* A drop the channel's read could not cover is not a miss on that drop either. The lists were
+       built from timestamps alone, before anything knew how far each read reached, so a channel
+       that has just been excused from a cross has to be taken out of the drop's missing list too —
+       otherwise the matrix says "not judged" while the drop below it still names the channel as
+       one that failed, and only one of the two can be true. */
+    r.cells.forEach((cell, i) => {
+      const s = slots[i];
+      if(!s || cell.state !== "unseen") return;
+      const at = s.missing.indexOf(r.id);
+      if(at !== -1) s.missing.splice(at, 1);
+      (s.unseenBy = s.unseenBy || []).push(r.id);
+    });
+
     /* Viber (timefold) folds in the same way, by time instead of caption: a drop it landed in is
        marked present, but it is NEVER added to `missing` — its silence is not a miss. That is what
        keeps a Viber-only notification from ever inventing a drop or crossing out healthy channels. */
@@ -2080,6 +2150,11 @@ const CELL = {
   miss: { g:"✗", cls:"miss", t:"nothing posted in this drop" },
   lang: { g:"⚠", cls:"lang", t:"posted, but the caption is in the wrong language" },
   none: { g:"·", cls:"none", t:"no data for this channel" },
+  /* The drop falls outside what this channel's read could see — it went out after the channel was
+     last read, or further back than the read reached. Deliberately NOT a cross: the read never
+     looked here, so it has nothing to say, and saying "missing" would be inventing a fact. The
+     next run judges it normally. */
+  unseen:{ g:"·", cls:"none", t:"outside what this channel's read covered — not judged, and not counted against it" },
 };
 const TABS = [["sum", "Summary"], ["drops", "What went out"], ["log", "Post log"], ["chan", "Per channel"]];
 let dcTab = "sum";
@@ -2100,7 +2175,8 @@ const clean = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g
    caption), and which channel is missing which — a card you can save or share after a run. Drawn as
    pure SVG (no library) and rasterised through a canvas, so it works offline and taints nothing. */
 const CARD_COLOR = { ok:"#3fb950", okc:"#2dd4bf", okh:"#3fb950", asm:"#2dd4bf",
-                     maybe:"#e3b341", miss:"#f85149", lang:"#e3b341", none:"#6e7681" };
+                     maybe:"#e3b341", miss:"#f85149", lang:"#e3b341", none:"#6e7681",
+                     unseen:"#6e7681" };
 function downloadReportCard(rep, o, wo){
   try{
     const tz = rep.tz, slots = rep.slots, rows = rep.rows;
@@ -2170,7 +2246,7 @@ function downloadReportCard(rep, o, wo){
         /* total badge */
         let tot, tc;
         if(r.mode === "timefold"){ tot = r.count + "/" + slots.length + " ✓"; tc = r.cells.some(x => x.state === "maybe") ? "#e3b341" : "#2dd4bf"; }
-        else if(r.mode === "none"){ tot = "—"; tc = "#6e7681"; }
+        else if(r.mode === "none" || r.status === "unknown"){ tot = "—"; tc = "#6e7681"; }
         else if(r.expected == null){ tot = String(r.count); tc = "#8b949e"; }
         else { tot = r.count + "/" + r.expected; tc = r.status === "ok" ? "#3fb950" : r.status === "short" ? "#f85149" : "#e3b341"; }
         el.push(esT(W - P, y + 14, tot, { size: 13.5, weight: 700, fill: tc, anchor: "end" }));
@@ -2343,7 +2419,11 @@ function dailyCheckModal(o){
              could not say which it was. Overshoot keeps the solid fill it earned by being
              measured; a suggestion gets the dashed outline this report uses everywhere else for
              "arrived at indirectly, not confirmed". */
-          const total = r.mode === "none"
+          /* "unknown" covers a channel that WAS in a judging mode but had nothing judgeable in it —
+             a hand-confirm channel nobody has answered yet, say. A dash, exactly like a channel
+             that was never collected: both mean the same thing, and "0/4" would mean something
+             very different and untrue. */
+          const total = r.mode === "none" || r.status === "unknown"
             ? `<span class="dc-pill un">${meta.unsupported ? "n/a" : "—"}</span>`
             : r.mode === "timefold"
               ? (() => { const conf = r.cells.filter(x => x.state === "ok").length,
