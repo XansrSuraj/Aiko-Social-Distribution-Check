@@ -1,0 +1,157 @@
+{
+  "ranFrom": "github-actions",
+  "startedAt": "2026-09-05T11:00:26.996Z",
+  "handles": {
+    "instagram": "sportsfc.vn",
+    "x": "Sportsfcvn",
+    "tiktok": "sportsfc.fans"
+  },
+  "byPlatform": {
+    "instagram": [],
+    "x": [],
+    "tiktok": []
+  },
+  "results": [
+    {
+      "platform": "instagram",
+      "route": "web_profile_info",
+      "url": "https://www.instagram.com/api/v1/users/web_profile_info/?username=sportsfc.vn",
+      "status": 429,
+      "ms": 156,
+      "bytes": 0,
+      "posts": 0,
+      "newest": null
+    },
+    {
+      "platform": "instagram",
+      "route": "profile page (logged out)",
+      "url": "https://www.instagram.com/sportsfc.vn/",
+      "status": 200,
+      "ms": 407,
+      "bytes": 618859,
+      "posts": 0,
+      "newest": null,
+      "head": "<!DOCTYPE html><html class=\"_9dls _ar44\" lang=\"en\" dir=\"ltr\"><head><link data-default-icon=\"https://static.cdninstagram.com/rsrc.php/yr/r/rzWiSjZRxk5.webp\" rel="
+    },
+    {
+      "platform": "x",
+      "route": "x.com profile (microdata)",
+      "url": "https://x.com/Sportsfcvn",
+      "status": 403,
+      "ms": 108,
+      "bytes": 5728,
+      "posts": 0,
+      "newest": null,
+      "head": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA"
+    },
+    {
+      "platform": "x",
+      "route": "cdn.syndication timeline",
+      "url": "https://cdn.syndication.twimg.com/srv/timeline-profile/screen-name/Sportsfcvn",
+      "status": 429,
+      "ms": 161,
+      "bytes": 20,
+      "posts": 0,
+      "newest": null,
+      "head": "Rate limit exceeded "
+    },
+    {
+      "platform": "x",
+      "route": "nitter nitter.net (rss)",
+      "url": "https://nitter.net/Sportsfcvn/rss",
+      "status": 410,
+      "ms": 789,
+      "bytes": 0,
+      "posts": 0,
+      "newest": null
+    },
+    {
+      "platform": "x",
+      "route": "nitter nitter.poast.org (rss)",
+      "url": "https://nitter.poast.org/Sportsfcvn/rss",
+      "status": 0,
+      "ms": 113,
+      "bytes": 0,
+      "posts": 0,
+      "newest": null,
+      "error": "fetch failed"
+    },
+    {
+      "platform": "x",
+      "route": "nitter nitter.privacydev.net (rss)",
+      "url": "https://nitter.privacydev.net/Sportsfcvn/rss",
+      "status": 0,
+      "ms": 455,
+      "bytes": 0,
+      "posts": 0,
+      "newest": null,
+      "error": "fetch failed"
+    },
+    {
+      "platform": "x",
+      "route": "nitter nitter.woodland.cafe (rss)",
+      "url": "https://nitter.woodland.cafe/Sportsfcvn/rss",
+      "status": 0,
+      "ms": 10426,
+      "bytes": 0,
+      "posts": 0,
+      "newest": null,
+      "error": "fetch failed"
+    },
+    {
+      "platform": "x",
+      "route": "nitter xcancel.com (rss)",
+      "url": "https://xcancel.com/Sportsfcvn/rss",
+      "status": 400,
+      "ms": 899,
+      "bytes": 49,
+      "posts": 0,
+      "newest": null,
+      "head": "<p>This URL only works inside an RSS client.</p> "
+    },
+    {
+      "platform": "x",
+      "route": "nitter nitter.tiekoetter.com (rss)",
+      "url": "https://nitter.tiekoetter.com/Sportsfcvn/rss",
+      "status": 429,
+      "ms": 748,
+      "bytes": 6056,
+      "posts": 0,
+      "newest": null,
+      "head": "<!doctype html> <html lang=\"en\"> <head> <meta charset=\"utf-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> <meta name=\"ro"
+    },
+    {
+      "platform": "tiktok",
+      "route": "profile page (embedded JSON)",
+      "url": "https://www.tiktok.com/@sportsfc.fans",
+      "status": 200,
+      "ms": 701,
+      "bytes": 369210,
+      "posts": 0,
+      "newest": null,
+      "head": "<!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\" /> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /> <title>T"
+    },
+    {
+      "platform": "tiktok",
+      "route": "tikwm mirror",
+      "url": "https://www.tikwm.com/api/user/posts?unique_id=%40sportsfc.fans&count=20",
+      "status": 403,
+      "ms": 151,
+      "bytes": 5925,
+      "posts": 0,
+      "newest": null,
+      "head": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA"
+    },
+    {
+      "platform": "tiktok",
+      "route": "rsshub public",
+      "url": "https://rsshub.app/tiktok/user/@sportsfc.fans",
+      "status": 403,
+      "ms": 146,
+      "bytes": 5777,
+      "posts": 0,
+      "newest": null,
+      "head": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"><meta http-equiv=\"X-UA"
+    }
+  ]
+}
