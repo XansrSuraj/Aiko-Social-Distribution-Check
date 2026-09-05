@@ -262,6 +262,46 @@ async function run(articles, handle) {
     ok(ids[ids.length - 1] === "800240", "and the oldest, which only later polls showed", ids[ids.length - 1]);
   }
 
+  /* ═══════ an old tweet in the first paint must not end the scrape ═══════
+     The third X failure, and the subtlest. Reaching back past the window says the FAR end is
+     covered; it says nothing about the near end. X's first paint routinely contains tweets from
+     well before the window while the newest ones are still arriving — so a reader that stopped the
+     moment an old tweet appeared finished before the newest had rendered, and the two most recent
+     drops were crossed on a channel that had posted in both. Coverage may be REPORTED, never used
+     to leave early. */
+  console.log("\n── an old tweet in the first paint does not end the run early");
+  {
+    const old1 = tweet({ id: "910001", mins: 40 * 60 });     // ~40h ago: older than the window
+    const new1 = tweet({ id: "910002", mins: 30 });
+    const new2 = tweet({ id: "910003", mins: 10 });
+    let poll = 0;
+    const document = {
+      querySelectorAll: sel => {
+        if (!sel.includes("article")) return [];
+        const n = poll++;
+        /* the first paint has ONLY the old tweet; the newest two arrive later, as X's timeline
+           call actually resolves */
+        if (n < 4) return [old1];
+        if (n < 8) return [old1, new1];
+        return [old1, new1, new2];
+      },
+      querySelector: () => null, body: { innerText: "" }, documentElement: { scrollTop: 0 },
+    };
+    const window = { scrollBy: () => {}, dispatchEvent: () => {}, innerHeight: 900 };
+    const setTimeout = (fn) => { fn(); return 0; };
+    const fn = new Function("document", "window", "setTimeout", "Event",
+      body + "\n;return xDomScrape;")(document, window, setTimeout, function Event() {});
+    const res = await fn("sportsfc_vn", 4000, 5, Date.now() - 24 * 3600e3);
+
+    const ids = res.posts.map(p => p.externalId);
+    ok(ids.indexOf("910002") !== -1 && ids.indexOf("910003") !== -1,
+      "the newest tweets, which arrived after the old one, are still collected",
+      `${res.posts.length}: ${ids.join(",")}`);
+    ok(res.covered === true,
+      "and the window is still reported covered, because an older tweet was genuinely seen",
+      String(res.covered));
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

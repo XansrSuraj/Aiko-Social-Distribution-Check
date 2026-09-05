@@ -344,27 +344,29 @@ ok(cr.alerts.length === 0, "so nothing is reported missing",
    misses. What must never happen again is the SILENCE: one unmatched word has to raise an alert
    that names the words and asks for a human to look. */
 {
-  /* a caption that says the same thing but not in the same words — comfortably over the bar, so
-     the old code called it delivered and moved on */
+  /* A caption that says the same thing in slightly different words. Demanding EVERY word crossed
+     real posts over trivia — a shortened link, a stray "https", a per-platform tracking suffix —
+     and those crosses buried the genuine misses. Up to CAPTION_SLACK (5) words may now differ and
+     the drop still counts as delivered; what may NEVER happen is that passing quietly. */
   const NEARLY = VN_A.replace("bất tử", "để đời").replace("chưa có hồi kết", "không dứt");
   let vr = contentRun({ fbv: [NEARLY, clip(VN_B, 55)], fbe: [clip(EN_A, 58), clip(EN_B, 50)] });
   const cell = crow(vr, "fbv").cells.find(x => x.match && x.match.missing && x.match.missing.length);
-  ok(cell && cell.state === "miss",
-    "a caption missing even a few words is CROSSED, never ticked",
+  ok(cell && cell.state === "okc" && cell.match.missing.length <= 5,
+    "a caption short by a handful of words is TICKED, inside the 5-word allowance",
     JSON.stringify(crow(vr, "fbv").cells.map(x => [x.state, x.match && x.match.matched + "/" + x.match.total])));
-  ok(crow(vr, "fbv").count === 1 && crow(vr, "fbv").status === "short",
-    "so the channel is short a post rather than reading complete",
+  ok(crow(vr, "fbv").count === 2 && crow(vr, "fbv").status === "ok",
+    "so the channel reads complete rather than short",
     `${crow(vr, "fbv").count}/2 ${crow(vr, "fbv").status}`);
 
   const v = vr.alerts.filter(a => a.kind === "verify" && a.id === "fbv");
-  ok(v.length === 1, "a near-miss raises exactly one verify alert",
+  ok(v.length === 1, "but it still raises exactly one verify alert — leniency is never silent",
     vr.alerts.map(a => a.kind).join(","));
-  ok(/CROSSED/.test(v[0].text) && /\d+ of \d+ words match/.test(v[0].text),
-    "which says it was crossed and how many words matched", v[0].text);
+  ok(/TICKED but not word-perfect/.test(v[0].text) && /\d+ of \d+ words match/.test(v[0].text),
+    "which says it was ticked leniently and how many words matched", v[0].text);
   ok(/do NOT/i.test(v[0].text) && cell.match.missing.every(w => v[0].text.indexOf(w) !== -1),
     "and names every word that did not match", v[0].text);
-  ok(/check by hand/i.test(v[0].text),
-    "and asks for a human, since a near-miss may be the same post reworded");
+  ok(/allowance/i.test(v[0].text),
+    "and says the allowance is why it counted as delivered", v[0].text);
   ok(vr.alerts[0].kind === "verify",
     "it sorts above every other alert", vr.alerts.map(a => a.kind).join(","));
 
@@ -1558,6 +1560,72 @@ console.log("\n── a reader that admits it saw only part of the window crosse
       "a complete read still crosses the two drops it really did miss",
       x.cells.map(cl => cl.state).join(","));
     ok(x.status === "short", "and the channel is still reported short", x.status);
+  }
+}
+
+/* ═══════════════════ where the caption allowance ends ═══════════════════
+   Five words may differ and the drop still counts; six may not. A boundary that is never asserted
+   is a boundary that drifts, and this one decides whether a real post reads as delivered or a
+   missing one reads as fine — so both sides of it are pinned here, along with the rule that neither
+   side is ever silent. */
+console.log("\n── the caption allowance: five words forgiven, six crossed");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "fbv", platform: "facebook", name: "Facebook · vn", lang: "vi" },
+  ];
+  /* a drop whose reference caption is a known list of words, so "how many differ" is exact */
+  const BASE = "một hai ba bốn năm sáu bảy tám chín mười trận đấu bóng đá cầu thủ huyền thoại giải";
+  const runC = caption => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.captions = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    c.posts = { ytv: [P("y1", 60, BASE)] };
+    c.captions = { fbv: [{ text: caption }] };
+    c.meta = { ytv: { ok: true, at: Date.now() }, fbv: { ok: true, at: Date.now() } };
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+  /* Make exactly N words differ. NOT by shortening: captionOverlap compares against the SHORTER
+     text on purpose, because Facebook clips long captions with "see more" and a truncated caption
+     is a subset that should still read as the same post. So a shorter caption matches perfectly.
+     Differing words are what count, so the last N are REPLACED with words the reference lacks. */
+  const OTHER = ["xoài", "chuối", "dừa", "mít", "ổi", "sầu", "nhãn", "vải"];
+  const differBy = n => {
+    const w = BASE.split(" ");
+    for(let k = 0; k < n; k++) w[w.length - 1 - k] = OTHER[k];
+    return w.join(" ");
+  };
+
+  {
+    const rep = runC(differBy(5));
+    const f = row(rep, "fbv");
+    ok(f.cells[0].state === "okc", "five missing words is still a tick", f.cells[0].state);
+    ok(f.status === "ok", "and the channel is not short", f.status);
+    const v = rep.alerts.filter(a => a.kind === "verify" && a.id === "fbv");
+    ok(v.length === 1 && /TICKED but not word-perfect/.test(v[0].text),
+      "and the lenient tick still announces itself", v.length ? v[0].text.slice(0, 80) : "(none)");
+  }
+
+  {
+    const rep = runC(differBy(6));
+    const f = row(rep, "fbv");
+    ok(f.cells[0].state === "miss", "six missing words is a cross", f.cells[0].state);
+    ok(f.status === "short", "and the channel is reported short", f.status);
+    const v = rep.alerts.filter(a => a.kind === "verify" && a.id === "fbv");
+    ok(v.length === 1 && /CROSSED/.test(v[0].text) && /allowance/.test(v[0].text),
+      "and the cross says how far past the allowance it fell",
+      v.length ? v[0].text.slice(0, 110) : "(none)");
+    ok(rep.alerts.some(a => a.kind === "missing" && a.id === "fbv"),
+      "and it is reported as a missing post as well");
+  }
+
+  /* a word-perfect caption stays completely quiet — the allowance must not make everything noisy */
+  {
+    const rep = runC(BASE);
+    const f = row(rep, "fbv");
+    ok(f.cells[0].state === "okc" && f.status === "ok", "a word-perfect caption ticks", f.status);
+    ok(!rep.alerts.some(a => a.kind === "verify" && a.id === "fbv"),
+      "and raises no alert at all", JSON.stringify(rep.alerts.map(a => a.kind)));
   }
 }
 

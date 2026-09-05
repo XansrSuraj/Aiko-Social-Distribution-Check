@@ -1225,6 +1225,14 @@ function captionOverlap(dropText, channelCaption){
    matched, so it is probably the same post reworded and worth a human minute — which keeps the
    information the old threshold carried without letting it grant a tick. */
 const CAPTION_NEAR = 0.6;
+/* How many words of a drop may be absent from a channel's caption and the drop still count as
+   delivered there. A word count rather than a percentage on purpose: a percentage scales with
+   caption length, so a long caption could differ in a dozen words and still pass, while a short one
+   could be crossed over a single article. Five is five either way.
+   It exists because demanding every word crossed real posts for trivia — a shortened link, a stray
+   "https", a per-platform tracking suffix — and those crosses buried the genuine misses. Whatever
+   it lets through is still reported: an imperfect tick always raises an alert naming the words. */
+const CAPTION_SLACK = 5;
 
 /* The one thing that separates two otherwise-identical templated posts is the fixture they name —
    its DATE. SportsFC captions carry it as "📅 28 August 2026" (and a kick-off time). Two posts a day
@@ -1587,9 +1595,16 @@ function reconcile(channels, opt){
         bag.forEach((cap, j) => {
           if(differentFixture(ref, cap.text)) return;     // same template, different day → not this drop
           const ov = captionOverlap(ref, cap.text);
-          /* Every word, or no tick. One word unaccounted for is enough to withhold the claim that
-             this reel went out — see CAPTION_NEAR above for why a cross is the safer error. */
-          if(ov.total >= 3 && !ov.missing.length) pairs.push({ i, j, ov });
+          /* Up to CAPTION_SLACK words may differ and the drop still counts as delivered.
+             Demanding EVERY word crossed real posts for trivia — a shortened link, a stray "https",
+             a tracking suffix like "d6cnqrox" that differs per platform by design. Those are the
+             same post, and crossing them buried the real misses in noise.
+             The allowance is deliberately a WORD COUNT, not a percentage: a percentage scales with
+             caption length, so a long caption could quietly differ in a dozen words and still pass.
+             Five is five whether the caption is twelve words or two hundred.
+             Nothing inside the allowance passes silently — every imperfect match still raises an
+             alert naming the exact words, so a tick that was granted leniently always says so. */
+          if(ov.total >= 3 && ov.missing.length <= CAPTION_SLACK) pairs.push({ i, j, ov });
         });
       });
       pairs.sort((a, b) => b.ov.ratio - a.ov.ratio);
@@ -1760,18 +1775,30 @@ function reconcile(channels, opt){
     if(mode === "content"){
       cells.forEach((x, i) => {
         const m = x.match;
-        if(x.state !== "miss" || !m || !m.total || !m.missing || !m.missing.length) return;
-        if(m.ratio < CAPTION_NEAR) return;    // a distant miss is just a miss; the missing alert has it
+        if(!m || !m.total || !m.missing || !m.missing.length) return;
+        const when = slots[i] ? "the " + slots[i].time + " drop" : "a drop";
         /* capped so one long caption cannot bury the rest of the report, but the count is always
            exact — the cap only limits how many are spelled out */
         const shown = m.missing.slice(0, 15);
+        const words = `${m.matched} of ${m.total} words match, ${m.missing.length} ` +
+                      `do${m.missing.length === 1 ? "es" : ""} NOT: ${shown.join(", ")}` +
+                      (m.missing.length > shown.length ? ` (+${m.missing.length - shown.length} more)` : "");
+
+        /* TICKED, but not on a perfect match. The allowance let it through, so the report says so
+           by name: a lenient tick that stayed silent would be indistinguishable from a verified one,
+           and the whole point of the allowance is that it is visible rather than free. */
+        if(x.state === "okc")
+          return alerts.push({ kind:"verify", id:c.id, name:c.name,
+            text:`${when} is TICKED but not word-perfect — ${words} · within the ` +
+                 `${CAPTION_SLACK}-word allowance, so it counts as delivered — worth a glance in ` +
+                 `case the wording drifted` });
+
+        if(x.state !== "miss") return;
+        if(m.ratio < CAPTION_NEAR) return;    // a distant miss is just a miss; the missing alert has it
         alerts.push({ kind:"verify", id:c.id, name:c.name,
-          text:`${slots[i] ? "the " + slots[i].time + " drop" : "a drop"} is CROSSED — only ` +
-               `${m.matched} of ${m.total} words match, ${m.missing.length} ` +
-               `do${m.missing.length === 1 ? "es" : ""} NOT: ${shown.join(", ")}` +
-               (m.missing.length > shown.length ? ` (+${m.missing.length - shown.length} more)` : "") +
-               ` · close, so it may be the same post reworded — check by hand and, if it did go ` +
-               `out, this is the wording to fix` });
+          text:`${when} is CROSSED — ${words} · that is ${m.missing.length - CAPTION_SLACK} more ` +
+               `than the ${CAPTION_SLACK}-word allowance, so it is counted as missing — check by ` +
+               `hand and, if it did go out, this is the wording to fix` });
       });
     }
 
@@ -1983,7 +2010,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.8.0";
+const EXT_WANT = "1.9.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two

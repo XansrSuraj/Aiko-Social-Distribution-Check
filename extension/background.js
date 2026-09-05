@@ -1198,19 +1198,20 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
      that had posted all seven. Union of every poll is the only correct reading of a list that
      recycles its own nodes. */
   const acc = new Map();
-  let stableRounds = 0, lastCount = -1, covered = false;
+  let stableRounds = 0, lastCount = -1, polls = 0;
   while (Date.now() - start < MAXW) {
+    polls++;
     for (const p of harvest()) if (!acc.has(p.externalId)) acc.set(p.externalId, p);
     const found = [...acc.values()];
 
-    /* Stop on COVERAGE, not on a count. Reading ten posts means nothing on its own; reading back
-       past the start of the window means everything inside it has been seen, which is the only
-       thing that licenses calling a drop missing. Counting instead was what produced "1/7": one
-       post found, and the run declared itself finished. */
-    if (sinceMs && found.length) {
-      const oldest = found.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity);
-      if (oldest < sinceMs) { covered = true; break; }
-    }
+    /* Coverage is DECIDED at the end, never used to leave early.
+       Reaching back past the window says the far end is covered; it says nothing about the near
+       end, and X's first paint routinely contains tweets from well before the window while the
+       newest ones are still arriving. Breaking the moment an old tweet appeared therefore ended the
+       scrape before the newest tweets had rendered — which is why the two most recent drops were
+       crossed on a channel that had posted in both. The loop now always runs until the timeline
+       stops giving anything new (or the budget ends), and coverage is computed from everything
+       collected. A few seconds more per channel is worth strictly more than an early exit. */
     if (found.length >= WANT) break;
 
     /* "nothing new across several polls" only means STOP once something has actually been found —
@@ -1221,7 +1222,7 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
        Six rather than three: X's timeline is virtualised and pauses between batches, so three quiet
        polls is a normal gap mid-scroll rather than the end of the timeline. Three was short enough
        that a single rendered tweet ended the run in under three seconds. */
-    if (found.length > 0) {
+    if (found.length > 0 && polls >= 4) {
       stableRounds = found.length === lastCount ? stableRounds + 1 : 0;
       if (stableRounds >= 6) break;
     }
@@ -1243,6 +1244,9 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
     await sleep(POLL);
   }
   const best = [...acc.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  /* decided from everything collected, once the timeline has stopped giving more */
+  const covered = !!(sinceMs && best.length &&
+    best.reduce((m, p) => Math.min(m, new Date(p.ts).getTime()), Infinity) < sinceMs);
 
   /* If nothing was ever found, say something more useful than silence: a login wall reads very
      differently from a page that simply took its time, and the next person debugging this should
