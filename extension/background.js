@@ -1188,10 +1188,20 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
   }
 
   const start = Date.now();
-  let best = [], stableRounds = 0, lastCount = -1, covered = false;
+  /* ACCUMULATE across polls; never keep a single snapshot.
+     X's timeline is virtualised in BOTH directions — scrolling down does not merely add tweets at
+     the bottom, it REMOVES the ones that leave the top from the DOM entirely. So any one harvest
+     sees only a moving window of the timeline, and keeping "the biggest single harvest" meant
+     keeping one arbitrary slice of it. That is what produced the second, stranger failure: the
+     reader scrolled past the newest tweets, they were unmounted, and the snapshot it kept held the
+     OLDER ones — so the three oldest drops were ticked and the four newest crossed, on a channel
+     that had posted all seven. Union of every poll is the only correct reading of a list that
+     recycles its own nodes. */
+  const acc = new Map();
+  let stableRounds = 0, lastCount = -1, covered = false;
   while (Date.now() - start < MAXW) {
-    const found = harvest();
-    if (found.length > best.length) best = found;
+    for (const p of harvest()) if (!acc.has(p.externalId)) acc.set(p.externalId, p);
+    const found = [...acc.values()];
 
     /* Stop on COVERAGE, not on a count. Reading ten posts means nothing on its own; reading back
        past the start of the window means everything inside it has been seen, which is the only
@@ -1232,7 +1242,7 @@ async function xDomScrape(handle, maxWaitMs, pollMs, sinceMs) {
     } catch (e) {}
     await sleep(POLL);
   }
-  best.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  const best = [...acc.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
 
   /* If nothing was ever found, say something more useful than silence: a login wall reads very
      differently from a page that simply took its time, and the next person debugging this should

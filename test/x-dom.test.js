@@ -226,6 +226,42 @@ async function run(articles, handle) {
       "but the window is NOT claimed as covered, so nothing may be crossed on it", String(res.covered));
   }
 
+  /* ═══════ the list RECYCLES its nodes — a single snapshot is never the timeline ═══════
+     The second, stranger live failure. X's timeline is virtualised in BOTH directions: scrolling
+     down does not merely add tweets at the bottom, it REMOVES the ones that leave the top from the
+     DOM. So each harvest sees only a moving window. A reader that keeps "the biggest single
+     harvest" keeps one arbitrary slice — and because scrolling moves that slice DOWNWARDS, the
+     slice it ends up keeping holds the OLDER tweets. On a channel that had posted seven times that
+     read as: the three oldest drops ticked, the four newest crossed. Exactly backwards.
+     The union of every poll is the only correct reading of a list that recycles its own nodes. */
+  console.log("\n── a timeline that unmounts what scrolls off the top is still read whole");
+  {
+    /* five tweets, newest first, but only three are ever in the DOM at once — the window slides
+       down one tweet per poll, dropping the newest as it goes, exactly as X does */
+    const all = [10, 60, 120, 180, 240].map(mins => tweet({ id: String(800000 + mins), mins }));
+    let poll = 0;
+    const document = {
+      querySelectorAll: sel => {
+        if (!sel.includes("article")) return [];
+        const startAt = Math.min(Math.floor(poll++ / 2), all.length - 3);
+        return all.slice(startAt, startAt + 3);         // a three-tweet sliding window
+      },
+      querySelector: () => null, body: { innerText: "" }, documentElement: { scrollTop: 0 },
+    };
+    const window = { scrollBy: () => {}, dispatchEvent: () => {}, innerHeight: 900 };
+    const setTimeout = (fn) => { fn(); return 0; };
+    const fn = new Function("document", "window", "setTimeout", "Event",
+      body + "\n;return xDomScrape;")(document, window, setTimeout, function Event() {});
+    const res = await fn("sportsfc_vn", 4000, 5, Date.now() - 24 * 3600e3);
+
+    const ids = res.posts.map(p => p.externalId);
+    ok(res.posts.length === 5, "every tweet the sliding window ever showed is kept, not just one slice",
+      `${res.posts.length}: ${ids.join(",")}`);
+    ok(ids[0] === "800010",
+      "including the NEWEST, which scrolling had unmounted — the four-newest-crossed failure", ids[0]);
+    ok(ids[ids.length - 1] === "800240", "and the oldest, which only later polls showed", ids[ids.length - 1]);
+  }
+
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
