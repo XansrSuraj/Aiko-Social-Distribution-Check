@@ -1950,6 +1950,13 @@ async function collectServer(o){
    No write endpoint and no admin key are involved either way. */
 
 let extReady = false;                       // set when the bridge announces itself
+/* The bridge has always announced its version and the page has always discarded it. Knowing it
+   matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
+   shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
+   was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
+const EXT_WANT = "1.2.0";
+let extVersion = null;
+const extStale = () => !!(extVersion && extVersion !== EXT_WANT);
 const extWaiters = new Map();               // request id -> resolve
 let extSeq = 0;
 
@@ -1957,7 +1964,7 @@ addEventListener("message", ev => {
   if(ev.source !== window) return;
   const m = ev.data;
   if(!m || typeof m !== "object") return;
-  if(m.__aiko === "ready"){ extReady = true; return; }
+  if(m.__aiko === "ready"){ extReady = true; if(m.version) extVersion = String(m.version); return; }
   if(m.__aiko === "progress"){ if(m.text) toast(m.text, "loader"); return; }
   if(m.__aiko === "result"){
     const done = extWaiters.get(m.id);
@@ -2335,7 +2342,11 @@ function dailyCheckModal(o){
         <div class="dc-run">
           <button class="b p" id="dcAll"><i data-lucide="play"></i> Run everything</button>
           <span class="dc-sw">${extReady
-            ? "server + extension, one press"
+            ? (extStale()
+                /* the fix is in this deployment but not in the copy running in the browser, which
+                   is the one that actually does the reading — say so plainly, with both numbers */
+                ? `extension is v${esc(extVersion)} but this build needs v${esc(EXT_WANT)} — reload it at chrome://extensions`
+                : "server + extension, one press")
             : brwIds.length ? `extension not detected — only ${esc(platNames(srvIds) || "the server")} will run`
                             : "server only — this org has no Facebook or Instagram channels"}</span>
           <span class="sp"></span>
@@ -2344,7 +2355,10 @@ function dailyCheckModal(o){
         </div>
         ${srcRow("Server", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
         ${srcRow("Browser", platNames(brwIds), gotFrom(brwIds), brwIds.length,
-          `<span class="dc-sn" style="opacity:.75">${extReady ? "extension ready" : "extension not detected"}</span>`)}
+          `<span class="dc-sn" style="opacity:.75">${extReady
+             ? (extStale() ? `extension v${esc(extVersion)} — OUTDATED, needs v${esc(EXT_WANT)}`
+                           : `extension ready${extVersion ? " · v" + esc(extVersion) : ""}`)
+             : "extension not detected"}</span>`)}
       </div>`;
 
     /* ── headline ── */
@@ -2819,7 +2833,10 @@ function dailyCheckModal(o){
         `  server     ${gotFrom(srvIds)}/${srvIds.length} channel(s)` +
           (checks.lastRun ? `  last collected ${new Date(checks.lastRun).toLocaleString()}` : "  never collected"),
         `  extension  ${gotFrom(brwIds)}/${brwIds.length} channel(s)  ` +
-          (extReady ? "detected" : "NOT DETECTED — reload it at chrome://extensions") +
+          (extReady
+            ? (extStale() ? `v${extVersion} OUTDATED — needs v${EXT_WANT}, reload it at chrome://extensions`
+                          : "detected" + (extVersion ? ` v${extVersion}` : ""))
+            : "NOT DETECTED — reload it at chrome://extensions") +
           (pendingN ? `  ${pendingN} run(s) waiting to be merged` : ""),
         ""];
 

@@ -1,0 +1,49 @@
+# Run the free-source probe from a GitHub Actions runner — a third network, after this repo's own
+# machine and Vercel. The question it settles: TikTok serves its profile page to Vercel but with an
+# EMPTY video list, which is a bot-reputation decision rather than a hard block, so a different IP
+# range may well be served the real thing. If it is, TikTok has a free, scheduled, keyless reader
+# and needs neither Apify credit nor a VPN.
+#
+# Results are committed to the `probe-results` branch rather than printed, so they can be read back
+# without needing the Actions UI or a token. Nothing here uses a secret and nothing is spent.
+
+name: probe free sources
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/probe-sources.js"
+      - ".github/workflows/probe-sources.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Probe every free route from this runner
+        env:
+          PROBE_WHERE: github-actions
+          PROBE_OUT: probe-results.json
+        run: node tools/probe-sources.js || true
+
+      - name: Publish the result to the probe-results branch
+        run: |
+          test -f probe-results.json || echo '{"error":"probe wrote nothing"}' > probe-results.json
+          git config user.name  "probe bot"
+          git config user.email "probe@users.noreply.github.com"
+          # an orphan branch each time: this is a snapshot, not a history worth keeping
+          git checkout --orphan probe-results
+          git rm -rf --cached . >/dev/null 2>&1 || true
+          find . -maxdepth 1 -mindepth 1 -not -name '.git' -not -name 'probe-results.json' -exec rm -rf {} +
+          git add probe-results.json
+          git commit -m "probe from a GitHub Actions runner"
+          git push -f origin probe-results
