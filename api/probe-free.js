@@ -264,6 +264,73 @@ async function deepTiktok(handle) {
   return out;
 }
 
+/* The profile page hands over the account's secUid but an EMPTY itemList — TikTok loads the videos
+   themselves through a separate XHR the page makes after render. That call is the last free route
+   worth trying: it needs no key, only the secUid the page already gave us. It is also the one
+   TikTok signs (msToken / X-Bogus) for its own client, so whether an unsigned call is answered is
+   exactly the thing that has to be measured rather than assumed. */
+async function deepTtList(handle) {
+  const out = { handle, steps: [] };
+
+  const page = await tryGet(`https://www.tiktok.com/@${encodeURIComponent(handle)}`);
+  const secUid = (page.body.match(/"secUid"\s*:\s*"([\w-]+={0,2})"/) || [])[1] || "";
+  out.steps.push({ step: "read secUid from profile page", status: page.status, found: !!secUid,
+                   secUidLength: secUid.length });
+  if (!secUid) return out;
+
+  const common = {
+    aid: "1988", app_language: "en", app_name: "tiktok_web", browser_language: "en-US",
+    browser_name: "Mozilla", browser_online: "true", browser_platform: "Win32",
+    browser_version: "5.0 (Windows NT 10.0; Win64; x64)", channel: "tiktok_web",
+    cookie_enabled: "true", count: "35", cursor: "0", device_platform: "web_pc",
+    focus_state: "true", from_page: "user", history_len: "3", is_fullscreen: "false",
+    is_page_visible: "true", language: "en", os: "windows", region: "US",
+    screen_height: "1080", screen_width: "1920", secUid, tz_name: "Asia/Ho_Chi_Minh",
+    webcast_language: "en", coverFormat: "2", post_item_list_request_type: "0",
+    device_id: "7300000000000000000",
+  };
+  const qs = o => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+
+  const variants = [
+    { name: "item_list (full web params)", url: `https://www.tiktok.com/api/post/item_list/?${qs(common)}` },
+    { name: "item_list (minimal params)",
+      url: `https://www.tiktok.com/api/post/item_list/?aid=1988&count=35&cursor=0&secUid=${encodeURIComponent(secUid)}` },
+  ];
+
+  for (const v of variants) {
+    const r = await tryGet(v.url, {
+      Accept: "application/json, text/plain, */*",
+      Referer: `https://www.tiktok.com/@${handle}`,
+      "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty",
+    });
+    const rec = { step: v.name, status: r.status, bytes: (r.body || "").length, error: r.error };
+    try {
+      const j = JSON.parse(r.body || "{}");
+      rec.statusCode = j.statusCode;
+      rec.itemListLength = Array.isArray(j.itemList) ? j.itemList.length : null;
+      rec.hasMore = j.hasMore;
+      if (Array.isArray(j.itemList) && j.itemList.length) {
+        const it = j.itemList[0];
+        rec.newest = it.createTime ? new Date(Number(it.createTime) * 1000).toISOString() : null;
+        rec.sample = String(it.desc || "").slice(0, 80);
+      }
+    } catch (e) { rec.head = (r.body || "").slice(0, 200).replace(/\s+/g, " "); }
+    out.steps.push(rec);
+  }
+
+  /* other public RSSHub deployments — rsshub.app itself is behind a Cloudflare challenge from here,
+     but the project is self-hostable and several open mirrors exist */
+  for (const host of ["rsshub.rssforever.com", "rss.shab.fun"]) {
+    const r = await tryGet(`https://${host}/tiktok/user/@${encodeURIComponent(handle)}`);
+    const parsed = r.body ? fromRss(r.body) : { markers: [], posts: [] };
+    out.steps.push({ step: "rsshub mirror " + host, status: r.status, bytes: (r.body || "").length,
+                     posts: parsed.posts.length, newest: parsed.posts.length ? parsed.posts[0].ts : null,
+                     head: parsed.posts.length ? undefined : (r.body || "").slice(0, 160).replace(/\s+/g, " ") });
+  }
+
+  return out;
+}
+
 /* Instagram answered 429 to a plain request. A real browser also sends Sec-Fetch-*, a Referer and
    an ASBD id; whether those change the answer is worth one probe, because if they do the reader is
    a header fix rather than an architecture change. */
@@ -312,7 +379,10 @@ module.exports = async (req, res) => {
   /* ?deep=tiktok / ?deep=instagram — structure, not verdicts */
   if (q.deep) {
     const h = String(q.handle || (q.deep === "instagram" ? "sportsfc.vn" : "sportsfc.fans"));
-    const body = String(q.deep) === "instagram" ? await deepInstagram(h) : await deepTiktok(h);
+    const which = String(q.deep);
+    const body = which === "instagram" ? await deepInstagram(h)
+               : which === "ttlist" ? await deepTtList(h)
+               : await deepTiktok(h);
     return res.status(200).json({ ok: true, deep: q.deep, handle: h, ranAt: new Date().toISOString(), body });
   }
   const platform = String(q.platform || "both").toLowerCase();
