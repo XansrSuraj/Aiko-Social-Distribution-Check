@@ -280,6 +280,11 @@ footer{border-top:1px solid var(--ln);padding:24px 20px 36px;text-align:center;c
 .dc-src .sp{flex:1}
 .dc-sw{color:var(--tx3);font-size:11.5px}
 .dc-sn{color:var(--tx2);font-size:11.5px;font-weight:640;white-space:nowrap}
+/* why a browser channel came back silent, printed beside the count that reports the shortfall.
+   Amber rather than red: it is the reader explaining itself, not an accusation about a post. */
+.dc-why{padding:8px 13px;background:var(--surf2);border-top:1px solid var(--ln2);
+  font-size:11.5px;line-height:1.55;color:var(--amb)}
+.dc-why b{color:var(--tx);font-weight:650}
 .dc-src .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--tx3)}
 .dc-src .dot.on{background:var(--grn)}
 .dc-src .dot.part{background:var(--amb)}
@@ -1971,7 +1976,12 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.4.0";
+const EXT_WANT = "1.4.1";
+/* The channels the extension is the reader for — server-side these are all either blocked by the
+   platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
+   to decide what to ask the extension for and to describe the split in the panel; keeping two
+   copies is what let the panel claim X was a server channel and forget TikTok entirely. */
+const EXT_PLATFORMS = ["facebook", "instagram", "x", "tiktok"];
 let extVersion = null;
 const extStale = () => !!(extVersion && extVersion !== EXT_WANT);
 const extWaiters = new Map();               // request id -> resolve
@@ -2123,8 +2133,7 @@ async function runEverything(o){
      words matched so a false "delivered" cannot slip through unseen. */
   const srvFailed = id => { const m = checks.meta[id]; return !m || !m.ok; };
   const browserChans = dcChannels(o)
-    .filter(c => (c.platform === "facebook" || c.platform === "instagram" || c.platform === "x" || c.platform === "tiktok")
-              && srvFailed(c.id))
+    .filter(c => EXT_PLATFORMS.indexOf(c.platform) !== -1 && srvFailed(c.id))
     .map(c => ({ id:c.id, platform:c.platform, url:c.url,
                  handle:(c.handle || "").replace(/^@/, "").trim(),
                  username:(c.handle || "").replace(/^@/, "").trim() || chanLabelFromUrl(c.url) }));
@@ -2373,8 +2382,14 @@ function dailyCheckModal(o){
        answers to a session, via the extension. Platform names for the two rows below are derived
        from whichever channels are actually present, rather than spelled out — so the next
        platform added to either side never has to be found and edited in here by hand. */
-    const srvIds = chans.filter(c => ["youtube", "telegram", "x", "viber"].indexOf(c.platform) !== -1).map(c => c.id);
-    const brwIds = chans.filter(c => ["facebook", "instagram"].indexOf(c.platform) !== -1).map(c => c.id);
+    /* Split by which source can actually READ each channel, from the one list runEverything asks
+       the extension for — these were two hardcoded platform lists that drifted apart from it. X had
+       moved to the extension when twitterapi.io stopped answering but was still filed under
+       "Server", and TikTok appeared in NEITHER row, so the panel showed eleven of thirteen channels
+       and reported "2/4" for a browser half that was really doing six. It read exactly like an
+       extension that had not run, which is the one thing it was not. */
+    const srvIds = chans.filter(c => EXT_PLATFORMS.indexOf(c.platform) === -1).map(c => c.id);
+    const brwIds = chans.filter(c => EXT_PLATFORMS.indexOf(c.platform) !== -1).map(c => c.id);
     const platNames = ids => [...new Set(chans.filter(c => ids.indexOf(c.id) !== -1)
       .map(c => platform(c.platform).name))].join(" · ");
     const gotFrom = ids => ids.filter(id => (checks.posts[id] || []).length ||
@@ -2411,6 +2426,20 @@ function dailyCheckModal(o){
           ${pendingN ? `<button class="b s" id="dcMerge"><i data-lucide="download"></i> Merge ${pendingN} waiting</button>` : ""}
           <button class="b s" id="dcRun" title="${esc(platNames(srvIds) || "Server")} only">Server only</button>
         </div>
+        ${(() => {
+          /* "2/4 channels" says two did not answer and nothing at all about WHY, which is the only
+             question a reader actually has at that moment. Each silent channel's own account of
+             what happened is already recorded; it is simply printed here, where the shortfall is
+             being reported, instead of leaving it to be hunted for further down the report. */
+          const silent = brwIds
+            .filter(id => !(checks.posts[id] || []).length && !(checks.captions[id] || []).length)
+            .map(id => ({ id, note: ((checks.meta || {})[id] || {}).note || "" }))
+            .filter(x => x.note);
+          if(!silent.length) return "";
+          return `<div class="dc-why">${silent.map(x =>
+            `<div><b>${esc((chans.find(c => c.id === x.id) || {}).name || x.id)}</b> — ${esc(x.note)}</div>`
+          ).join("")}</div>`;
+        })()}
         ${srcRow("Server", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
         ${srcRow("Browser", platNames(brwIds), gotFrom(brwIds), brwIds.length,
           `<span class="dc-sn" style="opacity:.75">${extReady
