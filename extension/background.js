@@ -1322,6 +1322,30 @@ async function xCollect(channels, onProgress, onResult) {
         posts = (res && res.posts) || [];
         diag = (res && res.diag) || "";
         xCovered = !!(res && res.covered);
+
+        /* ── and again on /with_replies ──────────────────────────────────────
+           X's profile "Posts" tab OMITS the account's replies and the continuations of its own
+           threads. Those are still posts the channel made, and on a channel that threads its
+           coverage they are a large share of the day. This is what was left after the reader was
+           fixed: it read 32 tweets, covered the window, and two drops still had nothing — because
+           the tweets for them were never on the tab it was reading.
+           /with_replies carries both, and everything on it is filtered by author anyway, so
+           merging can only ever ADD this account's own posts. */
+        try {
+          onProgress(`X — @${handle}: checking replies and threads too…`);
+          await chrome.tabs.update(tabId, { url: "https://x.com/" + encodeURIComponent(handle) + "/with_replies" });
+          await waitForLoad(tabId);
+          const more = await runInTab(tabId, xDomScrape, [handle, XW, XP, sinceMs]);
+          const seenIds = new Set(posts.map(p => p.externalId));
+          let added = 0;
+          for (const p of (more && more.posts) || []) {
+            if (seenIds.has(p.externalId)) continue;
+            seenIds.add(p.externalId); posts.push(p); added++;
+          }
+          if (added) via += "+replies";
+          /* either tab reaching past the window is enough to have covered it */
+          xCovered = xCovered || !!(more && more.covered);
+        } catch (e) { /* the main tab's result stands on its own */ }
         /* a read that never got back past the window cannot support a cross, and says so */
         if (posts.length && !(res && res.covered))
           diag = `only ${posts.length} tweet(s) rendered before the timeline stopped giving more — ` +

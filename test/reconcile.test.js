@@ -1629,5 +1629,60 @@ console.log("\n── the caption allowance: five words forgiven, six crossed");
   }
 }
 
+/* ═══════════════════ the wrong-language allowance ═══════════════════
+   A Vietnamese channel legitimately carries English words — a competition name, a player, a
+   borrowed football term — and putting a ⚠ on those teaches the reader to ignore the symbol, which
+   costs far more than it saves. Above the allowance it is no longer a borrowed word or two, it is a
+   reel in the wrong language, and that is exactly what the symbol is for.
+   The allowance decides whether the MATRIX marks a cell. It never decides whether the fact is
+   reported: both sides are listed in the problems section, and the line says which happened. */
+console.log("\n── a few borrowed English words are noted, an English reel is flagged");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "ttv", platform: "tiktok",   name: "TikTok · vn",   lang: "vi" },
+  ];
+  const runC = ttText => {
+    const c = M.checks();
+    c.posts = {}; c.counts = {}; c.meta = {}; c.captions = {}; c.confirms = {};
+    Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+    c.posts = {
+      ytv: [P("y1", 60, "Trận đấu bóng đá của câu lạc bộ")],
+      ttv: [Object.assign(P("t1", 61, ttText), { channelId: "ttv" })],
+    };
+    c.meta = { ytv: { ok: true, at: Date.now() }, ttv: { ok: true, at: Date.now() } };
+    return M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+
+  /* Vietnamese with a handful of English words in it — the ordinary case on a football channel */
+  {
+    const rep = runC("Trận đấu bóng đá của câu lạc bộ — the match is live now");
+    const t = row(rep, "ttv");
+    ok(t.cells[0].state !== "lang",
+      "a Vietnamese caption borrowing a few English words is NOT flagged on the matrix",
+      t.cells[0].state);
+    const la = rep.alerts.filter(a => a.kind === "lang" && a.id === "ttv");
+    if(la.length)
+      ok(/not flagged on the matrix/.test(la[0].text),
+        "and if it is noted at all, the note says it was inside the allowance", la[0].text.slice(0, 100));
+    else ok(true, "and it raised no language problem at all");
+  }
+
+  /* a reel that really did go out in English on the Vietnamese channel */
+  {
+    const rep = runC("Two England legends. Two incredible careers. One big question for all the " +
+                     "fans watching this match today and the whole season ahead");
+    const t = row(rep, "ttv");
+    ok(t.cells[0].state === "lang",
+      "an English reel on a Vietnamese channel IS flagged on the matrix", t.cells[0].state);
+    const la = rep.alerts.filter(a => a.kind === "lang" && a.id === "ttv");
+    ok(la.length === 1 && /FLAGGED as the wrong language/.test(la[0].text),
+      "and the problems section says so, with the word count",
+      la.length ? la[0].text.slice(0, 120) : "(none)");
+    ok(la.length === 1 && /allowance/.test(la[0].text),
+      "naming the allowance it went past", la.length ? la[0].text.slice(-90) : "(none)");
+  }
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

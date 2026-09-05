@@ -1234,6 +1234,19 @@ const CAPTION_NEAR = 0.6;
    it lets through is still reported: an imperfect tick always raises an alert naming the words. */
 const CAPTION_SLACK = 5;
 
+/* How many words of the WRONG language a caption may carry before the matrix flags the cell.
+   A Vietnamese channel legitimately carries English words — a competition name, a player, a
+   borrowed football term — and flagging those put a ⚠ on correct posts, which teaches the reader
+   to ignore the symbol. Above the allowance it is no longer a borrowed word or two, it is a post in
+   the wrong language, and that is what the symbol is for.
+   Below it the mismatch is NOT hidden: it is still listed in the problems section with the exact
+   counts. The allowance decides whether a cell is marked, never whether a fact is reported. */
+const LANG_SLACK = 5;
+/* the words of the other language actually counted, so the allowance is measured, not guessed */
+const offLangWords = d => (d && d.lang === "en" ? (d.enw || 0)
+                        : d && d.lang === "vi" ? (d.vnw || 0) : 0);
+const langFlagged = d => offLangWords(d) > LANG_SLACK;
+
 /* The one thing that separates two otherwise-identical templated posts is the fixture they name —
    its DATE. SportsFC captions carry it as "📅 28 August 2026" (and a kick-off time). Two posts a day
    apart share ~70% of their words but name different dates, so this is what stops yesterday's
@@ -1645,9 +1658,13 @@ function reconcile(channels, opt){
                        : `the read reached back only to ${hhmm(new Date(oldestRead).toISOString(), tz)}, so this drop was never examined` };
           return { state:"miss", post:null };
         }
+        /* Only a caption that is substantially in the wrong language marks the cell. A Vietnamese
+           channel carrying an English competition name or a player's name is not an English post,
+           and flagging those taught the reader to ignore the symbol. Every mismatch, however small,
+           is still reported in the problems list — see langIssues below. */
         const bad = mine.find(p => {
           const d = detectLang(p.text);
-          return c.lang && d.lang && d.lang !== c.lang;
+          return c.lang && d.lang && d.lang !== c.lang && langFlagged(d);
         });
         /* the drop did arrive here, hours after the rest. Carried onto the cell so the matrix can
            say so on its own — otherwise the summary shows a plain tick and only the drops tab
@@ -1833,12 +1850,23 @@ function reconcile(channels, opt){
     if(mode !== "none" && !foldsByTime(c) && n > maxPer)
       alerts.push({ kind:"over", id:c.id, name:c.name,
         text:`${n} posts in ${hours}h — over the ${maxPer} you would expect at most` });
-    for(const x of langIssues)
+    /* EVERY mismatch is listed here, however small — the allowance decides whether the matrix marks
+       the cell, never whether the fact is reported. The line says which of the two happened, so a
+       reader can tell "this reel went out in the wrong language" from "this caption borrowed a
+       couple of English words", without having to count them by eye. */
+    for(const x of langIssues){
+      const off = offLangWords(x.d), flagged = langFlagged(x.d);
       alerts.push({ kind:"lang", id:c.id, name:c.name,
         /* count-only channels carry captions but no instant, so there is no time to name */
         text:(x.post.ts ? hhmm(x.post.ts, tz) + " post" : "a post") +
-             ` looks ${x.d.lang.toUpperCase()} on a ${c.lang.toUpperCase()} channel (${x.d.why})`,
+             ` looks ${x.d.lang.toUpperCase()} on a ${c.lang.toUpperCase()} channel (${x.d.why})` +
+             (flagged
+               ? ` · ${off} ${x.d.lang.toUpperCase()} word(s) — past the ${LANG_SLACK}-word allowance, ` +
+                 `so this reel is FLAGGED as the wrong language`
+               : ` · only ${off} ${x.d.lang.toUpperCase()} word(s), inside the ${LANG_SLACK}-word ` +
+                 `allowance — noted here but not flagged on the matrix`),
         post:x.post });
+    }
     if(meta.dead)
       alerts.push({ kind:"dead", id:c.id, name:c.name, text:"channel not found — fix the link" });
 
@@ -2010,7 +2038,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.10.0";
+const EXT_WANT = "1.11.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2051,7 +2079,7 @@ try{ postMessage({ __aiko:"request", action:"ping" }, location.origin); }catch(e
    API to a full page navigation per account, X renders a real tab, TikTok is a short reachability
    probe. A flat budget gave six channels the same allowance as one, which is how the wait came to
    expire mid-run in the first place. */
-const EXT_COST_MS = { facebook:110000, instagram:95000, x:70000, tiktok:35000 };
+const EXT_COST_MS = { facebook:110000, instagram:95000, x:120000, tiktok:35000 };
 const extBudget = channels => 45000 +
   channels.reduce((t, c) => t + (EXT_COST_MS[c.platform] || 30000), 0);
 
