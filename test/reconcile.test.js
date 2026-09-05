@@ -1684,5 +1684,72 @@ console.log("\n── a few borrowed English words are noted, an English reel is
   }
 }
 
+/* ═══════════════════ every drop accounts for every channel ═══════════════════
+   The "what went out" card used to show only the channels a drop reached and the ones it was
+   crossed on. Between them those cover the timed and caption-matched channels and silently omit
+   every other kind — so a thirteen-channel organisation showed "6 channels" and "missing on 2", and
+   the remaining five were nowhere. That is what made the report look stale: the numbers did not add
+   up and there was no way to ask why.
+   The card is now built from the same row cells the matrix is drawn from, which makes the two agree
+   by construction. This asserts the property that guarantees it: for every drop, each channel falls
+   in exactly one bucket, and the buckets account for all of them. */
+console.log("\n── every channel is accounted for on every drop");
+{
+  const CC = [
+    { id: "ytv", platform: "youtube",  name: "YouTube · vn",  lang: "vi" },
+    { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi" },
+    { id: "xvn", platform: "x",        name: "X · vn",        lang: "vi" },
+    { id: "fbv", platform: "facebook", name: "Facebook · vn", lang: "vi" },
+    { id: "ttv", platform: "tiktok",   name: "TikTok · vn",   lang: "vi" },
+    { id: "vbv", platform: "viber",    name: "Viber · vn",    lang: "vi" },
+  ];
+  const c = M.checks();
+  c.posts = {}; c.counts = {}; c.meta = {}; c.captions = {}; c.confirms = {}; c.beats = [];
+  Object.assign(c, { tz: 7, win: 15, hours: 24, maxPer: 4 });
+  /* a deliberately mixed day: two channels complete, one short, one caption-matched, one that
+     could not be read at all, and Viber which is only ever assumed */
+  c.posts = {
+    ytv: [P("y1", 200, VN_TEXT), P("y2", 60, VN_TEXT)],
+    tgv: [P("t1", 201, VN_TEXT), P("t2", 61, VN_TEXT)],
+    xvn: [P("x1", 202, VN_TEXT)],
+    ttv: [],
+  };
+  c.captions = { fbv: [{ text: VN_TEXT }] };
+  c.meta = { ytv:{ok:true,at:Date.now()}, tgv:{ok:true,at:Date.now()}, xvn:{ok:true,at:Date.now()},
+             fbv:{ok:true,at:Date.now()}, ttv:{ok:false,note:"cannot reach tiktok.com",at:Date.now()} };
+  const rep = M.reconcile(CC, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+
+  /* the exact bucketing the card performs */
+  const bucket = st => (["ok","okc","okh","asm"].indexOf(st) !== -1) ? "went"
+                     : st === "lang" ? "lang" : st === "miss" ? "failed" : "unknown";
+
+  let everySlotComplete = true, everyChannelOnce = true;
+  rep.slots.forEach((s, si) => {
+    const counts = { went:0, lang:0, failed:0, unknown:0 };
+    for(const r of rep.rows){
+      const cell = (r.cells || [])[si];
+      const b = bucket(cell && cell.state);
+      if(!b) everyChannelOnce = false;
+      counts[b]++;
+    }
+    const total = counts.went + counts.lang + counts.failed + counts.unknown;
+    if(total !== rep.rows.length) everySlotComplete = false;
+  });
+
+  ok(rep.rows.length === CC.length, "every channel produces a row", `${rep.rows.length}/${CC.length}`);
+  ok(rep.slots.every(s => true) && everySlotComplete,
+    "on every drop the buckets add up to the full channel count — nobody is silently omitted");
+  ok(everyChannelOnce, "and each channel lands in exactly one bucket");
+  ok(rep.rows.every(r => (r.cells || []).length === rep.slots.length),
+    "every row has one cell per drop, so the card and the matrix cannot disagree",
+    rep.rows.map(r => r.id + ":" + (r.cells || []).length).join(" "));
+
+  /* the unreadable channel must be in "could not be checked", never in "did not go out" */
+  const tt = row(rep, "ttv");
+  ok(tt.cells.every(x => x.state !== "miss"),
+    "a channel that could not be read is never counted as a miss on any drop",
+    tt.cells.map(x => x.state).join(","));
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

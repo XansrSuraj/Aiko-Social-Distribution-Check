@@ -455,6 +455,11 @@ table.dc.mx th.whyc,table.dc.mx td.mt{max-width:190px;white-space:normal;line-he
 .dc-dt .sp{flex:1}
 .dc-cap{margin-top:7px;font-size:12.5px;color:var(--tx2);line-height:1.5}
 .dc-miss{margin-top:6px;font-size:12px;color:var(--red);font-weight:650}
+/* the other two thirds of a drop's account of itself: went out but in the wrong language, and
+   could not be checked at all. Muted for the last one on purpose — it is an absence of knowledge,
+   not a fault, and colouring it like one is what made unreadable channels look broken. */
+.dc-warn{margin-top:4px;font-size:12px;color:var(--amb);font-weight:640}
+.dc-unk{margin-top:4px;font-size:11.5px;color:var(--tx3);line-height:1.5}
 .dc-tw{overflow-x:auto;border-top:1px solid var(--ln2)}
 table.dc{width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px}
 table.dc th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;
@@ -1649,14 +1654,22 @@ function reconcile(channels, opt){
           /* nothing here from this channel — but only call that a miss if the read could have
              seen it at all (see the coverage note above) */
           const at = new Date(s.at).getTime();
+          /* How far away this channel's NEAREST post was. A cross says "nothing here"; this says
+             whether nothing means nothing, or means "it went out fourteen minutes later and fell
+             outside the ±10 min grouping". Those are completely different faults with completely
+             different fixes, and the report could not tell them apart. */
+          const near = (posts[c.id] || []).reduce((best, p) => {
+            const gap = Math.abs(new Date(p.ts).getTime() - at);
+            return (!best || gap < best.gap) ? { gap, ts:p.ts } : best;
+          }, null);
           if(outsideRead(at))
-            return { state:"unseen", post:null,
+            return { state:"unseen", post:null, near,
                      why: readIncomplete
                        ? "the reader could not see the whole window on this channel, so nothing in it can be called missing"
                        : at > coveredTo
                        ? "this drop went out after the channel was last read, so it could not have been seen yet"
                        : `the read reached back only to ${hhmm(new Date(oldestRead).toISOString(), tz)}, so this drop was never examined` };
-          return { state:"miss", post:null };
+          return { state:"miss", post:null, near };
         }
         /* Only a caption that is substantially in the wrong language marks the cell. A Vietnamese
            channel carrying an English competition name or a player's name is not an English post,
@@ -1833,10 +1846,23 @@ function reconcile(channels, opt){
         ? cells.map((x, i) => (x.state === "miss" && slots[i] && x.match && x.match.total)
             ? `${slots[i].time}: reel not found — only ${x.match.matched}/${x.match.total} words matched` : null).filter(Boolean)
         : [];
+      /* For a timed channel, say how close its nearest post was to each crossed drop. "nothing at
+         19:00" and "nothing at 19:00, though it posted 14 min away" are different faults: the first
+         is a post that never went out, the second is one that did and fell outside the grouping
+         window. Without this the report kept reporting the second as the first. */
+      const nearDetail = mode === "timeline"
+        ? cells.map((x, i) => {
+            if(x.state !== "miss" || !slots[i]) return null;
+            if(!x.near) return `${slots[i].time}: nothing within the whole window`;
+            const mins = Math.round(x.near.gap / 60e3);
+            return `${slots[i].time}: nearest post ${fmtGap(mins)} away (${hhmm(x.near.ts, tz)})`;
+          }).filter(Boolean)
+        : [];
       alerts.push({ kind:"missing", id:c.id, name:c.name, partial,
         text:`${expectedHere - n} post${expectedHere - n === 1 ? "" : "s"} missing` +
              (missedAt.length ? ` — nothing at ${missedAt.join(", ")}` : "") +
              (wordDetail.length ? ` · ${wordDetail.join("; ")}` : "") +
+             (nearDetail.length ? ` · ${nearDetail.join("; ")}` : "") +
              (partial ? ` · only ${all.length} post(s) could be read here and none predate the ` +
                         `window, so part of it was never seen` : "") });
     }
@@ -2038,7 +2064,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.11.0";
+const EXT_WANT = "1.12.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2672,7 +2698,22 @@ function dailyCheckModal(o){
         : `<div class="dc-empty">Nothing collected in this window yet.</div>`}`;
 
     /* ── tab: drops ── */
-    const tabDrops = rep.slots.length ? rep.slots.map(s => {
+    const tabDrops = rep.slots.length ? rep.slots.map((s, si) => {
+      /* Account for EVERY channel on every drop, from the same cells the matrix is drawn from.
+         This card used to show only `present` and `missing`, which between them covered the timed
+         and caption-matched channels and silently omitted the rest — so a thirteen-channel
+         organisation showed "6 channels" and "missing on 2", and the reader was left to wonder what
+         happened to the other five. Reading the row cells instead makes the card agree with the
+         matrix by construction, and the three groups always add up to the channel count. */
+      const went = [], failed = [], unknown = [], wrongLang = [];
+      for(const r of rep.rows){
+        const cell = (r.cells || [])[si];
+        const st = cell && cell.state;
+        if(st === "ok" || st === "okc" || st === "okh" || st === "asm") went.push(r.id);
+        else if(st === "lang") wrongLang.push(r.id);
+        else if(st === "miss") failed.push(r.id);
+        else unknown.push(r.id);                    // unseen, none, maybe — nothing is known
+      }
       const seen = new Map();
       for(const p of s.posts){
         const d = detectLang(p.text);
@@ -2690,7 +2731,9 @@ function dailyCheckModal(o){
           <div style="min-width:0;flex:1">
             <div class="dc-dt2"><b>${esc(hhmmss(s.at, rep.tz))}</b>
               <span class="dc-pill un">${esc(s.kinds.join(", ") || "post")}</span>
-              <span class="dc-pill ${s.missing.length ? "short" : "ok"}">${s.present.length} channel${s.present.length === 1 ? "" : "s"}</span>
+              <span class="dc-pill ${failed.length ? "short" : unknown.length ? "sg" : "ok"}"
+                title="${went.length + wrongLang.length} went out · ${failed.length} did not · ${unknown.length} could not be checked"
+                >${went.length + wrongLang.length}/${rep.rows.length} channels</span>
               ${(s.late || []).length ? `<span class="dc-pill late" title="${esc((s.late || [])
                   .map(l => nameOf(l.id) + " " + fmtGap(l.mins) + " behind").join(" · "))
                 }">${s.late.length} late</span>` : ""}
@@ -2709,7 +2752,12 @@ function dailyCheckModal(o){
           </div>
         </div>
         ${caps || `<div class="dc-cap">no caption text collected for this drop</div>`}
-        ${s.missing.length ? `<div class="dc-miss">missing on ${esc(s.missing.map(nameOf).join(", "))}</div>` : ""}
+        ${failed.length ? `<div class="dc-miss">did NOT go out on ${esc(failed.map(nameOf).join(", "))}</div>` : ""}
+        ${wrongLang.length ? `<div class="dc-warn">went out in the WRONG LANGUAGE on ${
+            esc(wrongLang.map(nameOf).join(", "))}</div>` : ""}
+        ${unknown.length ? `<div class="dc-unk">could not be checked on ${
+            esc(unknown.map(nameOf).join(", "))} — nothing is known either way, so none of these is
+            counted as a miss</div>` : ""}
       </div>`;
     }).join("") : `<div class="dc-empty">No drops in this window.</div>`;
 
