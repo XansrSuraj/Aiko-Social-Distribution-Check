@@ -214,6 +214,93 @@ function instagramRoutes(handle) {
   ];
 }
 
+/* ═══════════════════ structure dump ═══════════════════ */
+
+/* When a route answers 200 but yields no posts, the useful question stops being "did it work" and
+   becomes "what IS in there". This reports the shape of what came back — which scope keys exist,
+   whether the post-list markers appear anywhere in the raw text at all — so the reader can be
+   pointed at the right path instead of guessed at. */
+async function deepTiktok(handle) {
+  const url = `https://www.tiktok.com/@${encodeURIComponent(handle)}`;
+  const r = await tryGet(url);
+  const html = r.body || "";
+  const out = { url, status: r.status, bytes: html.length };
+
+  const countOf = s => (html.split(s).length - 1);
+  out.rawCounts = {
+    createTime: countOf('"createTime"'),
+    itemList: countOf('"itemList"'),
+    aweme_id: countOf('"aweme_id"'),
+    video_id: countOf('"video_id"'),
+    uniqueId: countOf('"uniqueId"'),
+    statusCode: countOf('"statusCode"'),
+  };
+
+  const m = html.match(/<script[^>]+id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) { out.rehydration = "absent"; return out; }
+  out.rehydrationBytes = m[1].length;
+  let data;
+  try { data = JSON.parse(m[1]); } catch (e) { out.rehydration = "unparsable: " + String(e.message || e); return out; }
+  const scope = data.__DEFAULT_SCOPE__ || {};
+  out.scopeKeys = Object.keys(scope);
+  const detail = scope["webapp.user-detail"];
+  if (detail) {
+    out.userDetailKeys = Object.keys(detail);
+    out.userDetailStatus = { statusCode: detail.statusCode, statusMsg: detail.statusMsg };
+    const info = detail.userInfo || {};
+    out.userInfoKeys = Object.keys(info);
+    if (info.stats) out.stats = { videoCount: info.stats.videoCount, followerCount: info.stats.followerCount };
+    if (info.user) out.user = { uniqueId: info.user.uniqueId, secUid: (info.user.secUid || "").slice(0, 24) + "…" };
+  }
+  /* the item list may be filed under a different scope key than the profile itself */
+  for (const k of Object.keys(scope)) {
+    const v = scope[k];
+    if (v && typeof v === "object" && Array.isArray(v.itemList)) {
+      out.itemListFoundUnder = k;
+      out.itemListLength = v.itemList.length;
+      break;
+    }
+  }
+  return out;
+}
+
+/* Instagram answered 429 to a plain request. A real browser also sends Sec-Fetch-*, a Referer and
+   an ASBD id; whether those change the answer is worth one probe, because if they do the reader is
+   a header fix rather than an architecture change. */
+async function deepInstagram(handle) {
+  const browserish = {
+    "X-IG-App-ID": IG_APP_ID,
+    "X-ASBD-ID": "129477",
+    "X-Requested-With": "XMLHttpRequest",
+    Accept: "*/*",
+    Referer: `https://www.instagram.com/${handle}/`,
+    Origin: "https://www.instagram.com",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Ch-Ua": '"Chromium";v="120", "Not:A-Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+  };
+  const routes = [
+    { name: "web_profile_info + full browser headers",
+      url: `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(handle)}`,
+      headers: browserish },
+    { name: "profile page + document headers",
+      url: `https://www.instagram.com/${encodeURIComponent(handle)}/`,
+      headers: { Accept: "text/html,application/xhtml+xml", "Sec-Fetch-Site": "none",
+                 "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Sec-Fetch-User": "?1",
+                 "Upgrade-Insecure-Requests": "1" } },
+  ];
+  const done = [];
+  for (const rt of routes) {
+    const r = await tryGet(rt.url, rt.headers);
+    done.push({ route: rt.name, status: r.status, bytes: (r.body || "").length,
+                head: (r.body || "").slice(0, 200).replace(/\s+/g, " "), error: r.error });
+  }
+  return done;
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -221,6 +308,13 @@ module.exports = async (req, res) => {
   if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Use GET." });
 
   const q = req.query || {};
+
+  /* ?deep=tiktok / ?deep=instagram — structure, not verdicts */
+  if (q.deep) {
+    const h = String(q.handle || (q.deep === "instagram" ? "sportsfc.vn" : "sportsfc.fans"));
+    const body = String(q.deep) === "instagram" ? await deepInstagram(h) : await deepTiktok(h);
+    return res.status(200).json({ ok: true, deep: q.deep, handle: h, ranAt: new Date().toISOString(), body });
+  }
   const platform = String(q.platform || "both").toLowerCase();
   const ttHandle = String(q.handle || (platform === "instagram" ? "sportsfc.vn" : "sportsfc.fans"));
   const igHandle = String(q.handle || "sportsfc.vn");
