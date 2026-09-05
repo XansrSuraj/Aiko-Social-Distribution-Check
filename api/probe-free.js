@@ -1,6 +1,17 @@
 /**
- * GET /api/probe-free — which FREE (no key, no credit) route can actually read TikTok and
- * Instagram from this host?
+ * GET /api/probe-free — which FREE (no key, no credit) route can actually read TikTok, Instagram
+ * or X from this host?
+ *
+ * WHAT IT FOUND (measured from Vercel, 2026-09-05 — re-run it before trusting any of this):
+ *   TikTok    the profile page loads and gives the account's stats and secUid, but the itemList is
+ *             served EMPTY; the item_list XHR that fills it answers 200-with-no-body unless the
+ *             request is signed (msToken / X-Bogus), and replaying TikTok's own cookies does not
+ *             change that. tikwm and every public RSSHub mirror sit behind a Cloudflare challenge.
+ *             No free server-side route. Apify remains the only server-side reader.
+ *   Instagram 429 in ~25ms on every route — the datacenter IP is refused outright, not throttled
+ *             by volume. Free mirrors are Cloudflare-walled. Must be read from a real browser.
+ *   X         cdn.syndication (the public embed backend) answers 429 just as fast, and x.com
+ *             itself serves the logged-out shell with zero microdata. Also browser-only.
  *
  * Diagnosis only. It answers a question that cannot be settled from a desk: the readers that
  * matter run on Vercel, and every one of these platforms answers a datacenter IP differently from

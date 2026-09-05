@@ -6,11 +6,16 @@
  * by the browser itself, from the user's own IP, with the user's own session attached the same
  * way it is when they click a link.
  *
- *   instagram — one tab on instagram.com serves every account. A script running in it calls the
- *               same endpoints the site calls for itself; being same-origin and logged in, it
- *               answers reliably where the server-side attempt is rate-limited. Two are tried:
- *               the mobile feed first, since web_profile_info returns an Instagram-side schema
- *               error for some accounts that no amount of retrying or logging in will clear.
+ *   instagram — two routes, cheap one first.
+ *               (1) One tab on instagram.com serves every account: a script running in it calls
+ *               the same endpoints the site calls for itself. Two are tried — the mobile feed
+ *               first, since web_profile_info returns an Instagram-side schema error for some
+ *               accounts that no amount of retrying or logging in will clear.
+ *               (2) Whatever that misses is retried by NAVIGATING to the profile page itself, one
+ *               tab per account, and reading the posts Instagram embeds in the document. Route 1
+ *               is a background fetch, and Instagram increasingly answers those with nothing —
+ *               the same Sec-Fetch-Dest: empty refusal X was found to make. A real navigation is
+ *               a different request and gets a real answer.
  *
  *   facebook   three passes, because no single one is enough:
  *
@@ -140,6 +145,156 @@ async function igScrape(usernames) {
         }).filter(p => p.externalId && p.ts) };
     } catch (e) {
       out[u] = { ok: false, tried, note: String((e && e.message) || e) };
+    }
+  }
+  return out;
+}
+
+/* ═══════════════════ instagram: the profile tab ═══════════════════
+ *
+ * The route above asks Instagram's API from inside an instagram.com tab. That is a background
+ * fetch, and it carries Sec-Fetch-Dest: empty — which is exactly the request shape X was found to
+ * refuse (see the X section below), and Instagram throttles it the same way: the call is accepted
+ * and answered with nothing, so the channel reports "ran, collected nothing" with no error to show
+ * for it. A real top-level navigation is a different request entirely, and Instagram answers it
+ * with the profile AND the first page of posts embedded in the document.
+ *
+ * So this is the second route: open the profile itself in a tab and read the posts out of the page
+ * Instagram actually served. No API call, no app id, no session assumptions beyond the ones the
+ * browser already has.
+ *
+ * The posts arrive as JSON in <script type="application/json"> blocks, minified and deeply nested,
+ * and the nesting changes between Instagram builds. Rather than reach for a fixed path — which is
+ * what would break silently on the next redesign — every block is parsed and walked, keeping any
+ * node that carries BOTH a shortcode and a taken_at instant. That pair is a post wherever
+ * Instagram decides to file it.
+ */
+function igTabScrape(handle, maxWaitMs, pollMs) {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const wanted = String(handle || "").toLowerCase();
+  const budget = maxWaitMs == null ? 14000 : Number(maxWaitMs);
+  const gap = pollMs == null ? 800 : Number(pollMs);
+  const deadline = Date.now() + budget;
+
+  const seen = new Map();
+  const num = v => (v === undefined || v === null || v === "" ? null : Number(v));
+
+  const keep = node => {
+    const code = node.code || node.shortcode;
+    if (typeof code !== "string" || !/^[\w-]{5,30}$/.test(code)) return;
+    const at = Number(node.taken_at != null ? node.taken_at : node.taken_at_timestamp);
+    if (!isFinite(at) || at < 1e9 || at > 4e9) return;          // not a plausible post instant
+    /* a tagged, suggested or "related" post belongs to someone else — never this channel's */
+    const owner = String((node.owner && node.owner.username) ||
+                         (node.user && node.user.username) || "").toLowerCase();
+    if (owner && wanted && owner !== wanted) return;
+    if (seen.has(code)) return;
+
+    const capNode = node.caption;
+    const text = typeof capNode === "string" ? capNode
+               : (capNode && capNode.text) ? capNode.text
+               : (((node.edge_media_to_caption || {}).edges || [])[0] || {}).node?.text || "";
+    const isClip = node.product_type === "clips";
+    const mt = Number(node.media_type);
+    seen.set(code, {
+      externalId: code,
+      ts: new Date(at * 1000).toISOString(),
+      kind: isClip ? "reel" : mt === 8 ? "carousel" : mt === 2 ? "video" : "image",
+      text: text || "",
+      /* nulls, not zeros — Instagram omits play counts on images and hides likes on some accounts,
+         and a real 0 has to stay distinguishable from "not reported" */
+      views: num(node.play_count != null ? node.play_count : node.view_count),
+      likes: num(node.like_count),
+      comments: num(node.comment_count),
+      duration: node.video_duration != null ? Math.round(Number(node.video_duration)) : null,
+      thumb: (((node.image_versions2 || {}).candidates || [])[0] || {}).url || node.display_url || "",
+      permalink: "https://www.instagram.com/" + (isClip ? "reel/" : "p/") + code + "/",
+    });
+  };
+
+  const walk = (v, depth) => {
+    if (!v || typeof v !== "object" || depth > 14) return;
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    keep(v);
+    for (const k in v) {
+      const child = v[k];
+      if (child && typeof child === "object") walk(child, depth + 1);
+    }
+  };
+
+  const scanOnce = () => {
+    const blocks = document.querySelectorAll('script[type="application/json"]');
+    for (const b of blocks) {
+      const raw = b.textContent || "";
+      if (raw.length < 40) continue;
+      /* only blocks that could possibly hold a post — parsing every one of a hundred config blobs
+         on every poll is wasted work */
+      if (raw.indexOf("taken_at") === -1) continue;
+      try { walk(JSON.parse(raw), 0); } catch (e) { /* not this block */ }
+    }
+    return blocks.length;
+  };
+
+  return (async () => {
+    let blocks = 0, rounds = 0;
+    while (Date.now() < deadline) {
+      blocks = scanOnce();
+      rounds++;
+      if (seen.size >= 12) break;                 // plenty to cover a day
+      await sleep(gap);
+      if (seen.size && rounds >= 3) break;        // it has what it is going to give
+    }
+
+    /* the grid's own links, as corroboration — they prove posts exist even in the case where no
+       instant could be read, which is the difference between "nothing posted" and "could not read" */
+    const gridCodes = new Set();
+    for (const a of document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]')) {
+      const m = (a.getAttribute("href") || "").match(/\/(p|reel)\/([\w-]+)/);
+      if (m) gridCodes.add(m[2]);
+    }
+
+    const posts = [...seen.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    let diag = "";
+    if (!posts.length) {
+      const bodyText = (document.body && document.body.innerText || "").slice(0, 3000);
+      if (/^\/accounts\/login/.test(location.pathname) ||
+          document.querySelector('input[name="password"], input[name="username"]'))
+        diag = "a login page is showing — this browser is not logged into instagram.com";
+      else if (/sorry, this page isn.t available/i.test(bodyText)) diag = "Instagram says this profile does not exist";
+      else if (/this account is private/i.test(bodyText)) diag = "this account is private to the logged-in user";
+      else if (gridCodes.size) diag = `the grid shows ${gridCodes.size} post(s) but none carried a readable date`;
+      else diag = `no post data was embedded in the page (${blocks} json block(s), ${rounds} pass(es))`;
+    }
+    return { posts, diag, blocks, rounds, gridCodes: gridCodes.size, url: location.href };
+  })();
+}
+
+/* one tab per account: the profile page IS the request that works, so each account needs its own */
+async function igTabCollect(channels, onProgress) {
+  const out = [];
+  for (let i = 0; i < channels.length; i++) {
+    const c = channels[i];
+    const handle = String(c.username || c.handle || "").replace(/^@/, "").trim();
+    onProgress(`Instagram — @${handle} via its profile page (${i + 1}/${channels.length})…`);
+    let tabId = null;
+    try {
+      if (!handle) throw new Error("No Instagram handle for this channel");
+      const tab = await chrome.tabs.create({ url: "https://www.instagram.com/" + encodeURIComponent(handle) + "/", active: false });
+      tabId = tab.id;
+      await waitForLoad(tabId);
+      const res = await runInTab(tabId, igTabScrape, [handle, 14000, 800]);
+      const posts = (res && res.posts) || [];
+      if (!posts.length) throw new Error("Instagram's profile page gave no readable posts for @" + handle +
+        " — treat as unknown, not empty." + (res && res.diag ? " (" + res.diag + ")" : ""));
+      out.push({ channelId: c.id, platform: "instagram", username: handle, ok: true,
+                 note: `${posts.length} post(s) via the profile page (extension)` +
+                       (res.gridCodes ? ` · ${res.gridCodes} in the grid` : ""),
+                 posts, source: "extension-instagram-page" });
+    } catch (e) {
+      out.push({ channelId: c.id, platform: "instagram", username: handle, ok: false,
+                 note: String((e && e.message) || e), posts: [], source: "extension-instagram-page" });
+    } finally {
+      if (tabId != null) await chrome.tabs.remove(tabId).catch(() => {});
     }
   }
   return out;
@@ -1093,9 +1248,15 @@ async function collect(channels, onProgress) {
     for (const r of await ttCollect(ttChannels, onProgress)) results.push(r);
   }
 
-  /* ---- instagram, all accounts through one tab ---- */
+  /* ---- instagram: the API routes first, then the profile page for whatever they missed ----
+     The API routes are cheaper (one tab serves every account) but they are background fetches, and
+     Instagram increasingly answers those with nothing at all. So whatever they fail to read is
+     retried the expensive way — a real navigation to the profile itself, one tab each — which is
+     the request shape Instagram does answer. Only the failures are retried, so a working API read
+     still costs exactly one tab for the whole set. */
   if (igChannels.length) {
     onProgress(`Instagram — ${igChannels.length} account(s)…`);
+    const igResults = new Map();
     let tab = null;
     try {
       tab = await instagramTab();
@@ -1103,7 +1264,7 @@ async function collect(channels, onProgress) {
       const map = await runInTab(tab.tabId, igScrape, [names]);
       for (const c of igChannels) {
         const r = (map && map[c.username]) || { ok: false, note: "No response for this account" };
-        results.push({
+        igResults.set(c.id, {
           channelId: c.id, platform: "instagram", username: c.username,
           ok: !!r.ok, dead: !!r.dead,
           /* keep which route answered in the note — when one of the two is failing, that is the
@@ -1118,11 +1279,28 @@ async function collect(channels, onProgress) {
     } catch (e) {
       const note = String((e && e.message) || e);
       for (const c of igChannels) {
-        results.push({ channelId: c.id, platform: "instagram", username: c.username,
-                       ok: false, note, posts: [], source: "extension-instagram" });
+        igResults.set(c.id, { channelId: c.id, platform: "instagram", username: c.username,
+                              ok: false, note, posts: [], source: "extension-instagram" });
       }
       if (tab && !tab.reuse) await chrome.tabs.remove(tab.tabId).catch(() => {});
     }
+
+    /* a dead handle is a real answer — retrying it on the page would only confirm it slowly */
+    const stillMissing = igChannels.filter(c => {
+      const r = igResults.get(c.id);
+      return r && !r.ok && !r.dead;
+    });
+    if (stillMissing.length) {
+      for (const r of await igTabCollect(stillMissing, onProgress)) {
+        const apiNote = (igResults.get(r.channelId) || {}).note || "";
+        /* carry why the cheap route failed into the note either way — when the page route saves the
+           run that is worth knowing, and when both fail the report needs both reasons, not one */
+        igResults.set(r.channelId, Object.assign({}, r, {
+          note: r.note + (apiNote ? ` · api route first said: ${apiNote}` : ""),
+        }));
+      }
+    }
+    for (const c of igChannels) if (igResults.has(c.id)) results.push(igResults.get(c.id));
   }
 
   /* ---- facebook, one tab per Page ---- */

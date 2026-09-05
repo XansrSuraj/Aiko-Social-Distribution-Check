@@ -78,9 +78,14 @@ function call(method, body, query) {
   check(r.body.added === 1 && r.body.total === 3, "but a genuinely new post is taken",
     JSON.stringify(r.body));
 
-  /* no id given: the instant becomes the id, so the same instant still cannot double up */
-  await call("POST", { channelId: "vb2", posts: [{ ts: "2026-08-16T07:48:00Z", text: "no id" }] });
-  r = await call("POST", { channelId: "vb2", posts: [{ ts: "2026-08-16T07:48:00Z", text: "no id" }] });
+  /* no id given: the instant becomes the id, so the same instant still cannot double up.
+     The instant has to be a RELATIVE one. A hardcoded date was used here originally and silently
+     rotted: once it drifted past the store's 14-day retention every write was pruned on arrival,
+     so the post being de-duplicated no longer existed to collide with and three assertions failed
+     for a reason that had nothing to do with de-duplication. */
+  const noIdTs = ago(2);
+  await call("POST", { channelId: "vb2", posts: [{ ts: noIdTs, text: "no id" }] });
+  r = await call("POST", { channelId: "vb2", posts: [{ ts: noIdTs, text: "no id" }] });
   check(r.body.added === 0, "a post with no id is de-duplicated on its timestamp",
     JSON.stringify(r.body));
 
