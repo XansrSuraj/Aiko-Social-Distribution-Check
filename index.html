@@ -1976,7 +1976,7 @@ let extReady = false;                       // set when the bridge announces its
    matters more than it looks: the extension lives in the browser, not in this deployment, so a fix
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
-const EXT_WANT = "1.5.0";
+const EXT_WANT = "1.6.0";
 /* The channels the extension is the reader for — server-side these are all either blocked by the
    platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
    to decide what to ask the extension for and to describe the split in the panel; keeping two
@@ -2017,7 +2017,7 @@ try{ postMessage({ __aiko:"request", action:"ping" }, location.origin); }catch(e
    API to a full page navigation per account, X renders a real tab, TikTok is a short reachability
    probe. A flat budget gave six channels the same allowance as one, which is how the wait came to
    expire mid-run in the first place. */
-const EXT_COST_MS = { facebook:110000, instagram:50000, x:35000, tiktok:12000 };
+const EXT_COST_MS = { facebook:110000, instagram:95000, x:35000, tiktok:12000 };
 const extBudget = channels => 45000 +
   channels.reduce((t, c) => t + (EXT_COST_MS[c.platform] || 30000), 0);
 

@@ -330,8 +330,49 @@ function igTabScrape(handle, maxWaitMs, pollMs) {
         `page's own data nor asking each post for its date returned one`;
       else diag = `no post data was embedded in the page (${blocks} json block(s), ${rounds} pass(es))`;
     }
-    return { posts, diag, blocks, rounds, gridCodes: gridCodes.size, url: location.href };
+    /* the grid in page order (newest first), so the caller can walk it post by post when no
+       instant could be read here — see igTabCollect */
+    const gridList = [...gridCodes.entries()].slice(0, 20)
+      .map(([code, meta]) => ({ code, kind: meta.kind, thumb: meta.thumb }));
+    return { posts, diag, blocks, rounds, gridCodes: gridCodes.size, gridList, url: location.href };
   })();
+}
+
+/* Runs inside a single Instagram POST page. A post page states its own instant plainly — Instagram
+   puts it in the page data and in a <time datetime> the post itself renders — so this needs none of
+   the guesswork the profile grid forced. Kept deliberately small: it is serialised into the page
+   and cut off from every outer binding, and it is run once per post, so it must be cheap. */
+function igPostRead() {
+  const html = document.documentElement ? document.documentElement.innerHTML : "";
+  let at = null;
+
+  const unix = html.match(/"taken_at(?:_timestamp)?"\s*:\s*(\d{9,11})/);
+  if (unix) at = Number(unix[1]) * 1000;
+  if (at === null) {
+    /* the timestamp the post shows a reader — an absolute instant, not a "2h" label */
+    const t = document.querySelector("time[datetime]");
+    const d = t ? new Date(t.getAttribute("datetime")).getTime() : NaN;
+    if (isFinite(d)) at = d;
+  }
+  /* a date outside anything plausible is not a date — better none than a wrong one */
+  if (at !== null && (!isFinite(at) || at < 1.2e12 || at > Date.now() + 864e5)) at = null;
+
+  let text = "";
+  const cap = html.match(/"edge_media_to_caption"[\s\S]{0,300}?"text"\s*:\s*"((?:[^"\\]|\\.){0,900})"/);
+  if (cap) { try { text = JSON.parse('"' + cap[1] + '"'); } catch (e) {} }
+  if (!text) {
+    const og = document.querySelector('meta[property="og:description"], meta[name="description"]');
+    text = (og && og.getAttribute("content")) || "";
+  }
+
+  /* counts only if the page states them outright; nulls otherwise, never a fabricated zero */
+  const numOf = re => { const m = html.match(re); return m ? Number(m[1]) : null; };
+  return {
+    at, text,
+    likes: numOf(/"edge_media_preview_like"\s*:\s*\{\s*"count"\s*:\s*(\d+)/),
+    views: numOf(/"video_view_count"\s*:\s*(\d+)/),
+    loginWall: /^\/accounts\/login/.test(location.pathname),
+  };
 }
 
 /* one tab per account: the profile page IS the request that works, so each account needs its own */
@@ -350,11 +391,52 @@ async function igTabCollect(channels, onProgress, onResult) {
       tabId = tab.id;
       await waitForLoad(tabId);
       const res = await runInTab(tabId, igTabScrape, [handle, 14000, 800]);
-      const posts = (res && res.posts) || [];
+      let posts = (res && res.posts) || [];
+      let via = "the profile page";
+
+      /* ── walk the grid post by post when the page gave no instants ────────────
+         Measured on this account: twelve posts render, the page carries no date for any of them,
+         AND every background request for one is refused — the API answered 429 and so did each
+         post's embed. But the profile page itself rendered perfectly, which is the tell: Instagram
+         is throttling this browser's FETCHES while serving its NAVIGATIONS normally. It is the
+         same distinction X taught us, and the answer is the same — stop fetching, navigate.
+         So the one tab already open is walked through each post in turn. Newest first, stopping as
+         soon as a post is older than the window, so a channel that posted six times today costs
+         seven navigations rather than twenty. */
+      const grid = (res && res.gridList) || [];
+      if (!posts.length && grid.length) {
+        const cutoff = Date.now() - 36 * 3600e3;      // comfortably past any window the report asks for
+        const budget = Date.now() + 60000;
+        const got = [];
+        for (const g of grid) {
+          if (Date.now() > budget) break;
+          onProgress(`Instagram — @${handle}: reading post ${got.length + 1} of up to ${grid.length}…`);
+          try {
+            await chrome.tabs.update(tabId, { url: "https://www.instagram.com/p/" + encodeURIComponent(g.code) + "/" });
+            await waitForLoad(tabId);
+            const one = await runInTab(tabId, igPostRead, []);
+            if (!one || !one.at || !isFinite(one.at)) continue;   // no date claimed, so no post filed
+            if (one.at < cutoff) break;                            // past the window — the rest are older still
+            got.push({
+              externalId: g.code,
+              ts: new Date(one.at).toISOString(),
+              kind: g.kind === "reel" ? "reel" : "image",
+              text: one.text || "",
+              views: one.views != null ? one.views : null,
+              likes: one.likes != null ? one.likes : null,
+              comments: null, duration: null,
+              thumb: g.thumb || "",
+              permalink: "https://www.instagram.com/" + (g.kind === "reel" ? "reel/" : "p/") + g.code + "/",
+            });
+          } catch (e) { /* one post failing is not the channel failing */ }
+        }
+        if (got.length) { posts = got.sort((a, b) => new Date(b.ts) - new Date(a.ts)); via = "each post's own page"; }
+      }
+
       if (!posts.length) throw new Error("Instagram's profile page gave no readable posts for @" + handle +
         " — treat as unknown, not empty." + (res && res.diag ? " (" + res.diag + ")" : ""));
       done({ channelId: c.id, platform: "instagram", username: handle, ok: true,
-                 note: `${posts.length} post(s) via the profile page (extension)` +
+                 note: `${posts.length} post(s) via ${via} (extension)` +
                        (res.gridCodes ? ` · ${res.gridCodes} in the grid` : ""),
                  posts, source: "extension-instagram-page" });
     } catch (e) {
