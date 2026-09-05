@@ -404,6 +404,65 @@ async function deepTtList(handle) {
   return out;
 }
 
+/* X's EMBEDDED-TIMELINE backend. Every "embed this profile" widget on the open web is served by
+   cdn.syndication.twimg.com, which means it is public by design, unsigned, and not the endpoint X
+   blocks datacenter IPs from — the thing that stops api/collect.js reading x.com directly. If it
+   answers here, X stops needing a paid key at all. */
+async function deepX(handle) {
+  const h = encodeURIComponent(String(handle).replace(/^@/, ""));
+  const out = { handle, steps: [] };
+
+  const routes = [
+    { name: "cdn.syndication timeline-profile",
+      url: `https://cdn.syndication.twimg.com/srv/timeline-profile/screen-name/${h}` },
+    { name: "cdn.syndication timeline-profile (json suffix)",
+      url: `https://cdn.syndication.twimg.com/srv/timeline-profile/screen-name/${h}?showReplies=false` },
+    { name: "syndication.twitter.com timeline-profile",
+      url: `https://syndication.twitter.com/srv/timeline-profile/screen-name/${h}` },
+    { name: "x.com profile (microdata, for comparison)", url: `https://x.com/${h}` },
+  ];
+
+  for (const rt of routes) {
+    const r = await tryGet(rt.url, { Accept: "text/html,application/json,*/*" });
+    const body = r.body || "";
+    const rec = { step: rt.name, status: r.status, bytes: body.length, ms: r.ms, error: r.error };
+
+    /* the syndication routes answer with an HTML shell whose __NEXT_DATA__ carries the tweets */
+    const nd = body.match(/<script[^>]+id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (nd) {
+      rec.hasNextData = true;
+      try {
+        const data = JSON.parse(nd[1]);
+        const entries = [];
+        const walk = (v, d) => {
+          if (!v || typeof v !== "object" || d > 14) return;
+          if (Array.isArray(v)) { for (const x of v) walk(x, d + 1); return; }
+          /* a tweet: an id_str plus a created_at that parses */
+          if (v.id_str && v.created_at && isFinite(new Date(v.created_at).getTime())) {
+            entries.push({ id: v.id_str, ts: new Date(v.created_at).toISOString(),
+                           text: String(v.full_text || v.text || "").slice(0, 70),
+                           user: (v.user && v.user.screen_name) || "" });
+          }
+          for (const k in v) walk(v[k], d + 1);
+        };
+        walk(data, 0);
+        const mine = entries.filter(e => !e.user || e.user.toLowerCase() === String(handle).toLowerCase());
+        rec.tweetsFound = entries.length;
+        rec.tweetsThisAccount = mine.length;
+        if (mine.length) {
+          mine.sort((x, y) => new Date(y.ts) - new Date(x.ts));
+          rec.newest = mine[0].ts;
+          rec.sample = mine[0].text;
+        }
+      } catch (e) { rec.nextDataError = String((e && e.message) || e); }
+    }
+    rec.microdataArticles = body.split('itemType="https://schema.org/SocialMediaPosting"').length - 1;
+    if (!rec.tweetsThisAccount && !rec.microdataArticles) rec.head = body.slice(0, 200).replace(/\s+/g, " ");
+    out.steps.push(rec);
+  }
+  return out;
+}
+
 /* Instagram answered 429 to a plain request. A real browser also sends Sec-Fetch-*, a Referer and
    an ASBD id; whether those change the answer is worth one probe, because if they do the reader is
    a header fix rather than an architecture change. */
@@ -455,6 +514,7 @@ module.exports = async (req, res) => {
     const which = String(q.deep);
     const body = which === "instagram" ? await deepInstagram(h)
                : which === "ttlist" ? await deepTtList(h)
+               : which === "x" ? await deepX(String(q.handle || "Sportsfcvn"))
                : await deepTiktok(h);
     return res.status(200).json({ ok: true, deep: q.deep, handle: h, ranAt: new Date().toISOString(), body });
   }
