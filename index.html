@@ -346,6 +346,15 @@ table.dc a svg{width:14px;height:14px;vertical-align:-2px}
 .dc-head.warn{border-color:color-mix(in srgb,var(--amb) 38%,var(--ln));
   background:color-mix(in srgb,var(--amb) 6%,var(--surf2))}
 .dc-head.warn > svg{color:var(--amb);background:color-mix(in srgb,var(--amb) 16%,transparent)}
+/* the verdict lands first and should feel like it — a quick settle-in for the whole line, and the
+   icon disc gets its own beat right after so the shape registers a moment before the words do.
+   The bounce is reserved for good news; bad/warn get the same settle without the celebration. */
+.dc-head{animation:dc-head-in .38s cubic-bezier(.22,.9,.32,1) backwards}
+.dc-head > svg{animation:dc-icon-in .4s .1s cubic-bezier(.34,1.56,.64,1) backwards}
+.dc-head.good{animation-name:dc-head-in-pop}
+@keyframes dc-head-in{from{opacity:0;transform:translateY(6px)}}
+@keyframes dc-head-in-pop{0%{opacity:0;transform:translateY(6px) scale(.97)}60%{transform:translateY(0) scale(1.008)}100%{transform:none;opacity:1}}
+@keyframes dc-icon-in{from{transform:scale(.4) rotate(-20deg)}}
 .dc-sub{color:var(--tx2);font-size:12.5px;margin-top:3px}
 .dc-alist{margin-top:8px;display:flex;flex-direction:column;gap:5px}
 /* Two columns, not a wrapping flex row. As a flex row the badge, the channel name and the
@@ -651,6 +660,17 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .vlog-empty{color:var(--tx3);font-size:14px;text-align:center;padding:26px 10px;line-height:1.6}
 .vlog-row{display:flex;align-items:flex-start;gap:12px;background:var(--surf2);border:1px solid var(--ln);
   border-radius:12px;padding:12px 14px}
+/* a row that just arrived slides in and holds a brief tint so a live feed reads as live, not just
+   a list that occasionally resets itself. Only rows newer than the last paint get this class. The
+   fade-out lives inside the keyframe itself — a transition never fires on a class present at
+   insertion, only on a later change, so a held-then-released background is the only way to get
+   the tint to visibly recede without extra JS to strip the class afterwards. */
+.vlog-row.new{animation:vlog-row-in 1.1s cubic-bezier(.22,.9,.32,1) backwards}
+@keyframes vlog-row-in{
+  0%{opacity:0;transform:translateY(-8px) scale(.99);background:color-mix(in srgb,var(--a1) 14%,var(--surf2))}
+  55%{opacity:1;transform:none;background:color-mix(in srgb,var(--a1) 14%,var(--surf2))}
+  100%{background:var(--surf2)}
+}
 .vlog-dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px;background:var(--tx3)}
 .vlog-dot.ok{background:#22c55e} .vlog-dot.dup{background:var(--tx3)} .vlog-dot.warn{background:#f59e0b} .vlog-dot.dim{background:var(--tx3)}
 .vlog-main{flex:1;min-width:0}
@@ -673,6 +693,14 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
   .hero-h{font-size:26px}
   .ch-grid{grid-template-columns:1fr}
   .pipe{padding:12px 14px}
+}
+
+/* light/dark swap gets its own little flourish rather than snapping straight across */
+#thm svg{transition:transform .4s cubic-bezier(.3,1.4,.4,1)}
+#thm.spin svg{transform:rotate(180deg)}
+
+@media(prefers-reduced-motion:reduce){
+  .dc-head,.dc-head > svg,.dc-head.good,.vlog-row.new,#thm svg{animation:none!important;transition:none!important}
 }
 </style>
 </head>
@@ -3252,7 +3280,10 @@ function render(){
   if(vr) vr.onclick = () => { vr.classList.add("spin"); pollNotifLog(true); };
   if(!booting){
     anim(".hero-card", { y:16, opacity:0, duration:.4 });
-    anim(".ch-card", { y:14, opacity:0, stagger:.02, duration:.34 });
+    anim(".pipe", { y:14, opacity:0, duration:.4, delay:.08 });
+    anim(".channels-h,.ch-group-h", { y:10, opacity:0, duration:.3, stagger:.05, delay:.13 });
+    anim(".ch-card", { y:14, opacity:0, stagger:.02, duration:.34, delay:.17 });
+    anim(".vlog", { y:16, opacity:0, duration:.42, delay:.32 });
   }
 }
 
@@ -3261,6 +3292,7 @@ function render(){
    stays current on its own, with a manual refresh as a fallback. Shows each notification's words,
    which community it hit, when the phone sent it, and what the tool did with it. */
 let vlogTimer = null;
+let vlogLastAt = 0, vlogFirstPaint = true;
 const VLOG_OUTCOME = {
   "stored":                      { cls:"ok",   label:"stored" },
   "duplicate — already have this one": { cls:"dup", label:"duplicate" },
@@ -3284,9 +3316,14 @@ function renderNotifLog(log){
     : "everything your phone forwards · updates on its own";
   if(!log.length){
     list.innerHTML = `<div class="vlog-empty">No Viber notifications yet. When your phone forwards one, it appears here within seconds.</div>`;
+    vlogFirstPaint = false;
     return;
   }
   const commName = id => (id || "").replace(/^viber:/, "") || "—";
+  /* the whole list is rebuilt every 5s poll, so "new" can't just mean "wasn't in the DOM before" —
+     it means newer than the latest row we'd already shown. First paint never marks anything new;
+     that reveal is already owned by render()'s .vlog entrance animation. */
+  const cutoff = vlogLastAt, skipNew = vlogFirstPaint;
   list.innerHTML = log.map(e => {
     const o = VLOG_OUTCOME[e.outcome] || { cls:"dim", label:e.outcome || "seen" };
     const at = new Date(e.at);
@@ -3294,7 +3331,8 @@ function renderNotifLog(log){
     const rel = agoStr(Math.max(0, Math.round((Date.now() - at.getTime()) / 1000)));
     const sent = e.postedAt ? String(e.postedAt) : "";
     const sentNice = e.ts ? new Date(e.ts).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }) : "";
-    return `<div class="vlog-row">
+    const isNew = !skipNew && at.getTime() > cutoff;
+    return `<div class="vlog-row${isNew ? " new" : ""}">
       <span class="vlog-dot ${o.cls}"></span>
       <div class="vlog-main">
         <div class="vlog-line1">
@@ -3311,6 +3349,8 @@ function renderNotifLog(log){
     </div>`;
   }).join("");
   icons(list);
+  vlogLastAt = new Date(log[0].at).getTime();
+  vlogFirstPaint = false;
 }
 
 /* ── phone / pipeline monitor ──────────────────────────────────────────────
@@ -3374,6 +3414,9 @@ function paintHealth(h){
 
 /* ═══════════════════ boot ═══════════════════ */
 document.getElementById("thm").onclick = async () => {
+  const btn = document.getElementById("thm");
+  btn.classList.add("spin");
+  setTimeout(() => btn.classList.remove("spin"), 420);
   state.settings.theme = state.settings.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = state.settings.theme;
   writeLocal();
