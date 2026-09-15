@@ -44,6 +44,9 @@ jobs:
           git checkout --orphan probe-results
           git rm -rf --cached . >/dev/null 2>&1 || true
           find . -maxdepth 1 -mindepth 1 -not -name '.git' -not -name 'probe-results.json' -exec rm -rf {} +
-          git add probe-results.json
+          # this branch has no app to serve — tell Vercel not to deploy it (belt-and-braces
+          # alongside the same setting in main's vercel.json, since it's unclear which one Vercel reads)
+          echo '{"git":{"deploymentEnabled":false}}' > vercel.json
+          git add probe-results.json vercel.json
           git commit -m "probe from a GitHub Actions runner"
           git push -f origin probe-results
