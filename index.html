@@ -2383,7 +2383,7 @@ function downloadReportCard(rep, o, wo){
       return `<text x="${x}" y="${y}" font-family="'Segoe UI',Roboto,Arial,sans-serif" ` +
         `font-size="${o2.size || 15}" fill="${o2.fill || '#e6edf3'}" font-weight="${o2.weight || 400}" ` +
         `text-anchor="${o2.anchor || 'start'}" opacity="${o2.op == null ? 1 : o2.op}">${esc(s)}</text>`; };
-    const trunc = (s, n) => { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+    const trunc = (s, n) => { s = String(s || ""); const a = Array.from(s); return a.length > n ? a.slice(0, n - 1).join("") + "…" : s; };
     const deliveredIn = i => rows.filter(r => ["ok","okc","okh","asm"].indexOf((r.cells[i]||{}).state) !== -1).length;
     const snip = s => { const t = (s.posts || []).map(p => clean(p.text || "")).find(x => x && x.length > 3) || ""; return trunc(t, 84); };
 
