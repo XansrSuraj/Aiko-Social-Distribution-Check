@@ -68,13 +68,16 @@ a{color:inherit;text-decoration:none}
 .disp{font-family:"Inter Tight","Inter",sans-serif}
 
 /* ambient light */
-.aura{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
-.aura i{position:absolute;border-radius:50%;filter:blur(120px);opacity:.34}
-html[data-theme="dark"] .aura i{opacity:.24}
-.aura i:nth-child(1){width:50vw;height:50vw;background:var(--a1);top:-18vw;left:-12vw;animation:dr1 26s ease-in-out infinite}
-.aura i:nth-child(2){width:40vw;height:40vw;background:var(--a2);top:2vw;right:-14vw;animation:dr2 30s ease-in-out infinite}
+.aura{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:var(--bg)}
+.aura i{position:absolute;border-radius:50%;filter:blur(130px);opacity:.46}
+html[data-theme="dark"] .aura i{opacity:.3}
+.aura i:nth-child(1){width:56vw;height:56vw;background:var(--a1);top:-22vw;left:-16vw;animation:dr1 26s ease-in-out infinite}
+.aura i:nth-child(2){width:44vw;height:44vw;background:var(--a2);top:0;right:-16vw;animation:dr2 30s ease-in-out infinite}
+.aura i:nth-child(3){width:34vw;height:34vw;background:var(--a3);bottom:-18vw;left:26vw;opacity:.26;animation:dr3 34s ease-in-out infinite}
+html[data-theme="dark"] .aura i:nth-child(3){opacity:.16}
 @keyframes dr1{50%{transform:translate(5vw,6vw) scale(1.15)}}
 @keyframes dr2{50%{transform:translate(-6vw,8vw) scale(.9)}}
+@keyframes dr3{50%{transform:translate(4vw,-6vw) scale(1.12)}}
 @media(prefers-reduced-motion:reduce){.aura i{animation:none}}
 
 /* ═══════════════ buttons ═══════════════ */
@@ -241,8 +244,8 @@ footer{border-top:1px solid var(--ln);padding:24px 20px 36px;text-align:center;c
    These four are set once and then rarely touched, so they are deliberately quiet — but they were
    also four bare dropdowns in a row, and "±15 min" and "max 4" say nothing at all about what they
    govern until you hover them. Each carries its own standing label now. */
-.dc-top{border:1px solid var(--ln);border-radius:var(--rm);background:var(--surf2);
-  padding:11px 13px 12px;margin-bottom:11px}
+.dc-top{border:1px solid var(--ln);border-radius:16px;background:var(--surf2);
+  padding:13px 15px 14px;margin-bottom:13px}
 .dc-bar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:9px}
 .dc-bar .sp{flex:1}
 .dc-fld{display:flex;flex-direction:column;gap:5px;min-width:0}
@@ -254,12 +257,12 @@ footer{border-top:1px solid var(--ln);padding:24px 20px 36px;text-align:center;c
 .dc-bar select:hover{border-color:color-mix(in srgb,var(--a1) 42%,var(--ln))}
 .dc-bar select:focus-visible{outline:2px solid var(--a1);outline-offset:-1px}
 .dc-when{font-size:11px;color:var(--tx3);font-weight:600;white-space:nowrap;padding-bottom:7px}
-.dc-day{border:1px solid var(--ln);border-radius:14px;margin-bottom:13px;overflow:hidden;background:var(--surf2)}
+.dc-day{border:1px solid var(--ln);border-radius:18px;margin-bottom:14px;overflow:hidden;background:var(--surf2);box-shadow:var(--s1)}
 .dc-day:last-child{margin-bottom:0}
-.dc-dh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:11px 14px;background:var(--surf)}
-.dc-dh b{font-size:14.5px;letter-spacing:-.2px}
+.dc-dh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:13px 16px;background:var(--surf)}
+.dc-dh b{font-size:15px;letter-spacing:-.2px;font-family:"Inter Tight",sans-serif}
 .dc-dh .sp{flex:1}
-.dc-pill{font-size:11px;font-weight:730;padding:2.5px 9px;border-radius:20px;white-space:nowrap}
+.dc-pill{font-size:11px;font-weight:800;padding:3.5px 11px;border-radius:20px;white-space:nowrap;letter-spacing:.01em}
 .dc-pill.ok{background:color-mix(in srgb,var(--grn) 17%,transparent);color:var(--grn)}
 .dc-pill.short{background:color-mix(in srgb,var(--red) 17%,transparent);color:var(--red)}
 .dc-pill.un{background:color-mix(in srgb,var(--tx3) 20%,transparent);color:var(--tx2)}
@@ -271,9 +274,9 @@ footer{border-top:1px solid var(--ln);padding:24px 20px 36px;text-align:center;c
 .dc-win b{font-size:12px;color:var(--tx2);font-variant-numeric:tabular-nums;font-weight:700}
 
 /* sources — what has reported, and what is still waiting */
-.dc-srcs{border:1px solid var(--ln);border-radius:13px;overflow:hidden;margin-bottom:13px}
-.dc-run{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 13px;
-  background:color-mix(in srgb,var(--a1) 7%,var(--surf2));border-bottom:1px solid var(--ln2)}
+.dc-srcs{border:1px solid var(--ln);border-radius:16px;overflow:hidden;margin-bottom:14px;box-shadow:var(--s1)}
+.dc-run{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 15px;
+  background:color-mix(in srgb,var(--a1) 8%,var(--surf2));border-bottom:1px solid var(--ln2)}
 .dc-run .sp{flex:1}
 .dc-src{display:flex;align-items:center;gap:9px;padding:9px 13px;background:var(--surf2);font-size:12.5px}
 .dc-src + .dc-src{border-top:1px solid var(--ln2)}
@@ -421,8 +424,8 @@ table.dc.mx .stick::after{content:"";position:absolute;top:0;right:0;bottom:0;wi
   background:var(--ln)}
 table.dc.mx tbody tr:not(.lgrp):hover td{background:color-mix(in srgb,var(--a1) 6%,transparent)}
 table.dc.mx tbody tr:not(.lgrp):hover .stick{background:color-mix(in srgb,var(--a1) 6%,var(--surf2))}
-.cl{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;
-  border-radius:8px;font-size:13px;font-weight:800;line-height:1;transition:transform .15s}
+.cl{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;
+  border-radius:9px;font-size:13.5px;font-weight:800;line-height:1;transition:transform .15s}
 .cl sup{font-size:8px;font-weight:700;margin-left:1px}
 .cl.ok{background:color-mix(in srgb,var(--grn) 16%,transparent);color:var(--grn)}
 .cl.okc{background:color-mix(in srgb,var(--grn) 12%,transparent);color:var(--grn);
@@ -466,7 +469,7 @@ table.dc.mx th.whyc,table.dc.mx td.mt{max-width:190px;white-space:normal;line-he
 .dc-key .cl{width:19px;height:19px;font-size:11px}
 
 /* what went out */
-.dc-drop{border:1px solid var(--ln);border-radius:12px;padding:10px 13px;margin-bottom:8px;background:var(--surf2)}
+.dc-drop{border:1px solid var(--ln);border-radius:15px;padding:12px 15px;margin-bottom:9px;background:var(--surf2);box-shadow:var(--s1)}
 .dc-drop.gap{border-color:color-mix(in srgb,var(--red) 42%,var(--ln))}
 .dc-dt{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dc-dt b{font-size:13.5px}
@@ -590,21 +593,22 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .dash{max-width:960px;margin:0 auto;padding:32px 22px 64px;display:flex;flex-direction:column;gap:28px}
 
 .hero-card{position:relative;overflow:hidden;background:var(--surf);border:1px solid var(--ln);
-  border-radius:var(--rl);box-shadow:var(--s3);padding:42px 38px 38px}
-.hero-card::before{content:"";position:absolute;inset:0 0 auto;height:4px;
+  border-radius:28px;box-shadow:var(--s4);padding:52px 44px 46px}
+.hero-card::before{content:"";position:absolute;inset:0 0 auto;height:5px;
   background:linear-gradient(90deg,var(--a1),var(--a2),var(--a3))}
-.hero-card::after{content:"";position:absolute;top:-45%;right:-12%;width:400px;height:400px;border-radius:50%;
-  background:radial-gradient(circle,color-mix(in srgb,var(--a2) 20%,transparent),transparent 68%);pointer-events:none}
-.hero-eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:800;letter-spacing:.15em;
-  text-transform:uppercase;color:var(--tx2);margin-bottom:18px}
+.hero-card::after{content:"";position:absolute;top:-50%;right:-15%;width:480px;height:480px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--a2) 24%,transparent),transparent 68%);pointer-events:none}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:800;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--tx2);margin-bottom:20px;padding:6px 14px 6px 10px;border-radius:999px;
+  background:var(--surf2);border:1px solid var(--ln);width:fit-content}
 .dot-live{width:8px;height:8px;border-radius:50%;background:#22c55e;
   box-shadow:0 0 0 0 color-mix(in srgb,#22c55e 70%,transparent);animation:live 1.8s ease-out infinite}
 @keyframes live{0%{box-shadow:0 0 0 0 color-mix(in srgb,#22c55e 60%,transparent)}
   100%{box-shadow:0 0 0 9px transparent}}
-.hero-h{margin:0;font-family:"Inter Tight",sans-serif;font-size:38px;line-height:1.1;font-weight:900;letter-spacing:-.03em;color:var(--tx)}
-.hero-p{margin:15px 0 0;max-width:60ch;font-size:15.5px;line-height:1.62;color:var(--tx2)}
-.hero-cta{display:flex;align-items:center;gap:17px;flex-wrap:wrap;margin-top:28px}
-.hero-when{font-size:13px;color:var(--tx3);font-weight:600}
+.hero-h{margin:0;font-family:"Inter Tight",sans-serif;font-size:clamp(32px,5vw,54px);line-height:1.05;font-weight:900;letter-spacing:-.035em;color:var(--tx)}
+.hero-p{margin:18px 0 0;max-width:60ch;font-size:16px;line-height:1.65;color:var(--tx2)}
+.hero-cta{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:32px}
+.hero-when{font-size:13px;color:var(--tx3);font-weight:650}
 
 .channels-h,.ch-group-h{display:flex;align-items:center;gap:10px}
 .channels-h{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
@@ -614,11 +618,11 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .ch-group-h{font-size:14px;font-weight:800;color:var(--tx);font-family:"Inter Tight",sans-serif}
 .ch-grid{display:grid;gap:13px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
 
-.ch-card{display:flex;align-items:center;gap:13px;padding:15px 16px;text-decoration:none;
-  background:var(--surf);border:1px solid var(--ln);border-radius:var(--rm);box-shadow:var(--s1);
+.ch-card{display:flex;align-items:center;gap:14px;padding:16px 17px;text-decoration:none;
+  background:var(--surf);border:1px solid var(--ln);border-radius:18px;box-shadow:var(--s1);
   transition:transform .2s cubic-bezier(.2,.9,.3,1.3),box-shadow .2s,border-color .2s}
-.ch-card:hover{transform:translateY(-3px);box-shadow:var(--s3);
-  border-color:color-mix(in srgb,var(--a1) 42%,var(--ln))}
+.ch-card:hover{transform:translateY(-4px) scale(1.015);box-shadow:var(--s3);
+  border-color:color-mix(in srgb,var(--a1) 45%,var(--ln))}
 .ch-meta{display:flex;flex-direction:column;min-width:0;gap:2px;flex:1}
 .ch-name{font-size:14.5px;font-weight:750;color:var(--tx);line-height:1.2;letter-spacing:-.1px}
 .ch-handle{font-size:12.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -627,9 +631,9 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 
 /* ── Viber pipeline monitor ── */
 .pipe{display:flex;align-items:center;gap:15px;background:var(--surf);border:1px solid var(--ln);
-  border-radius:var(--rm);box-shadow:var(--s2);padding:14px 19px;flex-wrap:wrap;
+  border-radius:18px;box-shadow:var(--s2);padding:15px 20px;flex-wrap:wrap;
   transition:box-shadow .2s,transform .2s}
-.pipe:hover{box-shadow:var(--s3);transform:translateY(-1px)}
+.pipe:hover{box-shadow:var(--s3);transform:translateY(-2px)}
 .pipe-dot{width:12px;height:12px;border-radius:50%;flex:none;position:relative;background:var(--tx3)}
 .pipe-dot.ok{background:#22c55e}
 .pipe-dot.bad{background:#ef4444}
@@ -653,8 +657,8 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 @media(prefers-reduced-motion:reduce){.pipe-dot::after{animation:none!important}}
 
 /* ── Viber live log ── */
-.vlog{background:var(--surf);border:1px solid var(--ln);border-radius:var(--rl);box-shadow:var(--s3);
-  padding:clamp(17px,3.5vw,24px);margin-top:8px}
+.vlog{background:var(--surf);border:1px solid var(--ln);border-radius:26px;box-shadow:var(--s3);
+  padding:clamp(18px,3.5vw,26px);margin-top:8px}
 .vlog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:15px}
 .vlog-title{display:flex;align-items:center;gap:9px;font-family:"Inter Tight",sans-serif;font-weight:800;font-size:17px;letter-spacing:-.02em}
 .vlog-live{width:9px;height:9px;border-radius:50%;background:#22c55e;flex:none;position:relative}
@@ -670,7 +674,8 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 .vlog-list{display:flex;flex-direction:column;gap:8px;max-height:440px;overflow-y:auto;margin:0 -4px;padding:0 4px}
 .vlog-empty{color:var(--tx3);font-size:14px;text-align:center;padding:26px 10px;line-height:1.6}
 .vlog-row{display:flex;align-items:flex-start;gap:12px;background:var(--surf2);border:1px solid var(--ln);
-  border-radius:12px;padding:12px 14px}
+  border-radius:14px;padding:13px 15px;transition:transform .15s,box-shadow .15s}
+.vlog-row:hover{transform:translateX(2px);box-shadow:var(--s1)}
 /* a row that just arrived slides in and holds a brief tint so a live feed reads as live, not just
    a list that occasionally resets itself. Only rows newer than the last paint get this class. The
    fade-out lives inside the keyframe itself — a transition never fires on a class present at
@@ -701,8 +706,7 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 
 @media(max-width:560px){
   .dash{padding:20px 15px 44px}
-  .hero-card{padding:28px 22px 26px}
-  .hero-h{font-size:26px}
+  .hero-card{padding:30px 22px 28px;border-radius:22px}
   .ch-grid{grid-template-columns:1fr}
   .pipe{padding:12px 14px}
 }
@@ -719,7 +723,7 @@ pre.code{margin:0;padding:13px 15px;border-radius:12px;background:var(--surf3);b
 </head>
 <body>
 
-<div class="aura"><i></i><i></i></div>
+<div class="aura"><i></i><i></i><i></i></div>
 
 <header>
   <div class="brand"><span class="m"><i data-lucide="radio-tower"></i></span><span id="ttl">Aiko</span></div>
@@ -3251,7 +3255,7 @@ function render(){
     <div class="dash">
       <section class="hero-card">
         <div class="hero-eyebrow"><span class="dot-live"></span> Daily check</div>
-        <h1 class="hero-h">Did today's content reach<br>every channel?</h1>
+        <h1 class="hero-h">Did today's content <span class="gt">reach every channel?</span></h1>
         <p class="hero-p">${o.socials.length} channels, ${langs.length} languages — checked drop by drop.
           See exactly which post landed where, which is missing, and which arrived late.</p>
         <div class="hero-cta">
