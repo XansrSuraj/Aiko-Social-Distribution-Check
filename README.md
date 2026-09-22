@@ -231,6 +231,35 @@ sees. localStorage stays the fallback: nothing is lost offline or on an unconfig
 the report simply is not shared until the cloud is back. A stale write is refused (HTTP 409) rather
 than clobbering a newer one, and the stored blob is shape-checked and size-capped server-side.
 
+## FM Deliveries dashboard
+
+`fm-deliveries.html` (linked from the header — **FM Deliveries**) is a separate, read-only viewer
+over the FM Deliveries feed: a different CMS's record of every card the content team published to
+the Football Module, including the ones that never went out. It shares this site's visual style but
+none of its code or data — it does not touch the daily check, its state, or `orghub_state` at all.
+
+It talks to the feed through two proxy routes (`api/fm-deliveries.js`, `api/fm-deliveries-meta.js`,
+sharing `fm-deliveries-client.js`) so the feed's `x-api-key` stays server-side per environment,
+never shipped to the browser:
+
+| Name | Required for | Value |
+|---|---|---|
+| `FM_DELIVERIES_API_HOST_DEV` / `_TEST` / `_PROD` | that environment's tab | the feed's base host, e.g. `https://cms-dev.example.com` |
+| `FM_DELIVERIES_API_KEY_DEV` / `_TEST` / `_PROD` | that environment's tab | the `x-api-key` the CMS team gives you for that environment |
+
+An environment with either value unset just shows "not configured" on that tab — the other
+environments, and the rest of the site, are unaffected. The dashboard only ever issues `GET`
+requests; there is no write path to the CMS anywhere in this feature.
+
+Dashboard features: an env switcher (dev/test/prod, each visually distinct so prod is never
+mistaken for a test), live auto-refresh (polling — the feed itself has no push/websocket channel),
+today/yesterday/tomorrow/7d/30d window presets on top of the feed's own `since`/`until`/`timeField`,
+every filter the feed supports (channel, language, state, outcome, cardId/setId/matchId), KPI tiles
+for delivered/failed+skipped/pending/unconfirmed, and a per-card raw-JSON view so a field the UI
+doesn't specially render is still visible — the feed's own stability promise is that fields are only
+ever added, never removed, so the dashboard should never need to hide new data. Filters are reflected
+in the URL so a specific filtered view is shareable.
+
 ## Viber — pushed in, not read out
 
 Viber is the one channel nothing can read. Its invite page names the community but carries none of
@@ -310,6 +339,10 @@ posts to Viber still has to push here itself.
 
 - The Supabase `service_role` key, `INGEST_KEY` and `ADMIN_PASSWORD` are **server-side only** —
   never sent to the browser, never committed. Keep them in Vercel env vars.
+- Same for the three `FM_DELIVERIES_API_KEY_*` values — the browser only ever calls this site's own
+  `/api/fm-deliveries*` proxy, which attaches the real key server-side. The feed's own guide notes
+  captions, asset URLs and the publishing user's email are in its responses, so treat the dashboard
+  like the rest of this internal tool: fine behind Deployment Protection, not for public exposure.
 - There is no login in the dashboard by design. Keep the deployment private with **Vercel
   Deployment Protection** (Settings → Deployment Protection) — it covers the dashboard and every
   `/api` route at the platform layer, which is where an internal tool should be gated.
