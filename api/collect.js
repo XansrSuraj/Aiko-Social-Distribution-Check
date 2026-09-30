@@ -1236,7 +1236,7 @@ function handleAlias(ch) {
   return handle ? ch.platform + ":" + handle : "";
 }
 
-async function collectOne(ch, cutoff) {
+async function collectOne(ch, cutoff, pushedAll) {
   const base = { channelId: ch.id, platform: ch.platform, ok: false, posts: [], note: "", source: "" };
 
   /* Anything pushed in wins, whatever the platform.
@@ -1251,12 +1251,18 @@ async function collectOne(ch, cutoff) {
      can ever know or paste in. The handle in its URL is the one thing about a channel that is
      public and stable, so a push filed under that (e.g. "sportsfc.vn", read straight off
      invite.viber.com/?g2=…) is found here even though it was never told the id. The id is tried
-     first only because it is the more specific claim when both happen to exist. */
+     first only because it is the more specific claim when both happen to exist.
+
+     pushedAll is the whole ingest store, read ONCE by the handler below and handed to every
+     channel — not re-read here. A run of N channels used to fire up to 2N separate full-table
+     reads (one, sometimes two, per channel) against the same Supabase row just to answer "was
+     anything pushed for this one", all in parallel; one shared read serves all of them. */
   try {
-    let pushed = await ingest.getPosts(ch.id);
+    const arr = k => (Array.isArray(pushedAll[k]) ? pushedAll[k] : []);
+    let pushed = arr(ch.id);
     if (!pushed.length) {
       const alias = handleAlias(ch);
-      if (alias && alias !== ch.id) pushed = await ingest.getPosts(alias);
+      if (alias && alias !== ch.id) pushed = arr(alias);
     }
     if (pushed.length) {
       const posts = pushed
@@ -1336,7 +1342,13 @@ module.exports = async (req, res) => {
     : Math.min(Math.max(Number(body.days) || DEFAULT_DAYS, 1), 90) * 24;
   const cutoff = Date.now() - hours * 3600e3;
 
-  const results = await Promise.all(channels.map(c => collectOne(c, cutoff)));
+  /* One read for the whole batch — see the comment in collectOne for why. An unreachable store
+     must never take a readable channel down with it, so a failure here just means every channel
+     finds nothing pushed and falls through to its own collector, exactly as before. */
+  let pushedAll = {};
+  try { pushedAll = await ingest.readAll(); } catch (e) { pushedAll = {}; }
+
+  const results = await Promise.all(channels.map(c => collectOne(c, cutoff, pushedAll)));
 
   return res.status(200).json({
     ok: true,
