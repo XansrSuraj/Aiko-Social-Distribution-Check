@@ -4,7 +4,7 @@
   "private": true,
   "description": "Internal directory of every official website and social media channel",
   "engines": {
-    "node": ">=18"
+    "node": "22.x"
   },
   "dependencies": {
     "@sparticuz/chromium-min": "^153.0.0",
