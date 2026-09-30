@@ -34,11 +34,20 @@ function runApify(channel, itemsByActor, opts) {
     return { status: 200, text: async () => "<html>a platform page — must not be used when a token is set</html>" };
   };
   if (o.token !== null) process.env.APIFY_TOKEN = o.token || "apify-test-key";
+  /* Instagram/Facebook try a real headless-browser read before Apify now (see collect.js) — that
+     goes out through Playwright's own Chromium process, which the global.fetch stub above cannot
+     see or intercept, so left enabled here it would launch a real browser against the real internet
+     instead of exercising the stubbed Apify path this test is for. */
+  process.env.DISABLE_BROWSER_READER = "1";
   const handler = load();
   return new Promise(resolve => handler(
     { method: "POST", body: { channels: [channel], hours: o.hours || 48 } },
     { setHeader() {}, status() { return this; }, json: p => resolve({ res: p.results[0], calls }) }
-  )).finally(() => { global.fetch = realFetch; if (o.token !== null) delete process.env.APIFY_TOKEN; });
+  )).finally(() => {
+    global.fetch = realFetch;
+    if (o.token !== null) delete process.env.APIFY_TOKEN;
+    delete process.env.DISABLE_BROWSER_READER;
+  });
 }
 
 (async () => {
@@ -135,12 +144,18 @@ function runApify(channel, itemsByActor, opts) {
     await wipeCache();
   }
 
-  console.log("\n── without a token, Facebook still says use the extension");
+  console.log("\n── without a token or a browser reader, Facebook fails honestly (never a false empty)");
   {
+    /* Facebook no longer needs the browser extension or a paid token at all in production — see
+       collectFacebookBrowser in collect.js, which reads it free via a real headless-browser page
+       load. This test disables that tier too (DISABLE_BROWSER_READER, set unconditionally by
+       runApify — see its comment) to pin what happens when EVERY Facebook reader is unavailable:
+       an honest failure (ok:false), never browserRequired (that fallback no longer exists) and
+       never a silent empty post list. */
     const ch = { id: "fb", platform: "facebook", url: "https://www.facebook.com/Sportsfcvn" };
     const { res } = await runApify(ch, {}, { token: null });
-    check(res.browserRequired === true && res.source === "browser-required",
-      "no APIFY_TOKEN → Facebook falls back to browser-required", res.source);
+    check(res.ok === false && !res.browserRequired && res.posts.length === 0,
+      "no reader available → an honest failure, not browser-required and not a false empty success", res.source);
   }
 
   console.log(`\n  ${pass} passed, ${fail} failed`);

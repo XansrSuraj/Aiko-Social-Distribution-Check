@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/collect.js": { "maxDuration": 60 }
+    "api/collect.js": { "maxDuration": 120 }
   },
   "git": {
     "deploymentEnabled": {

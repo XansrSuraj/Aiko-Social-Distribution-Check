@@ -38,13 +38,14 @@ Static HTML + CSS + vanilla JS, plus a handful of tiny Vercel serverless functio
 | | |
 |---|---|
 | `index.html` | the whole dashboard + report UI |
-| `api/collect.js` | `POST` read recent posts per channel (YouTube, Telegram, X, Viber) |
+| `api/collect.js` | `POST` read recent posts per channel — every platform, all server-side |
+| `browser-reader.js` | the shared headless-Chromium launcher `api/collect.js` uses for IG/FB/TikTok |
 | `api/ingest.js` | `POST` accept posts pushed in for any channel; `GET` read them back |
 | `api/notif.js` | `POST` a phone forwards one Viber notification, routed to its community |
 | `api/report.js` | `GET`/`PUT` the shared daily-check report row |
 | `api/data.js` | `GET` storage mode + settings (used to detect cloud vs local) |
 | `ingest-store.js` | the pushed-in post store (Supabase row 2, or a local file) |
-| `extension/` | Chrome extension for Facebook, Instagram, and X-as-fallback, via your own session |
+| `extension/` | Chrome extension fallback for X/IG/FB, only used if the browser reader ever fails |
 | `test/` | `npm test` — stubbed handlers plus a live parser check |
 
 Front-end libraries load from a CDN and are all **optional** — if they're blocked the app still
@@ -184,10 +185,43 @@ Four things get flagged:
 | YouTube | the official Data API, or the channel page if no key is set | nothing (a free `YOUTUBE_API_KEY` is sturdier) |
 | Telegram | `t.me/s/<channel>`, the public preview | nothing |
 | X (Twitter) | the profile page's own schema.org microdata | nothing |
-| Instagram | the extension, using your logged-in session | Chrome + you signed in |
-| Facebook | the extension, counting posts on the page | Chrome + you signed in |
+| Instagram | a real headless browser loading the profile page — see below | nothing (falls back to Apify/extension if set up) |
+| Facebook | a real headless browser loading the page — see below | nothing (falls back to Apify/extension if set up) |
+| TikTok | a real headless browser loading the profile page — see below | nothing (unverified on some networks — see below) |
 | Viber | pushed in to `/api/ingest` by whatever publishes to it | a sender — see below |
-| TikTok | — | not supported; refuses server requests |
+
+### Instagram, Facebook and TikTok are read server-side, for free, via a real browser
+
+No employee laptop, no browser extension, and no paid scraping subscription are required for any
+channel any more. `api/collect.js` launches an actual headless Chromium (Playwright) and navigates it
+to the real page, the same way a person opening it in a tab would — which turns out to matter: these
+platforms refuse a plain server-side `fetch()` to their own data endpoints outright (Instagram's
+public JSON endpoint answers a datacenter IP with an instant 429), but a full page load is not
+refused. Verified directly against this project's own channels:
+
+- **Instagram** — loads the profile page, reads the post/reel links straight out of the rendered
+  grid, then visits each one for its exact `<time datetime>` and full caption (`og:description`).
+  Some accounts sit behind Instagram's own age/content restriction wall regardless of who's asking
+  (verified: unrelated to this reader — a control account on the same network read perfectly fine);
+  that shows up as its own distinct note, never folded into "Instagram refused us."
+- **Facebook** — loads the page, reads its post/reel/video links, then visits each permalink for its
+  `creation_time` and caption (`og:title`).
+- **TikTok** — loads the profile page and reads its own `#__UNIVERSAL_DATA_FOR_REHYDRATION__` data
+  block directly (the same JSON TikTok's front end reads to draw the grid) — **not yet confirmed from
+  a live deployment.** TikTok is blocked at the network level (not just rate-limited) from this
+  project's dev environment and from the team's home ISP, so this path could only be built against
+  the documented page shape, not tested end-to-end the way Instagram and Facebook were. Run a real
+  daily check and check the TikTok channel's `note` field the first time — if it comes back
+  `tiktok-browser`, it worked; if it silently falls through to `tiktok-apify` or fails, the page shape
+  needs a look (`browser-reader.js` has the launcher, the extractor is `collectTiktokBrowser` in
+  `api/collect.js`).
+
+This costs Vercel function time (a real page load, a few seconds each) but no money and no
+credentials — see `browser-reader.js` for the launcher (`playwright-core` + `@sparticuz/chromium-min`
+on Vercel, the ordinary locally-installed Chromium anywhere else via `npx playwright install
+chromium`). `APIFY_TOKEN` and the Chrome extension both still work as an optional fallback layer if
+the browser reader ever fails on a given run — nothing was removed, this is a new first tier in front
+of them.
 
 **X needs no token and no login.** `x.com/<handle>` server-renders its recent posts as schema.org
 microdata — one `<article itemType="…/SocialMediaPosting">` each, carrying an exact ISO timestamp,
@@ -217,13 +251,17 @@ instead, and a drop counts as delivered when one of them says the same thing, wi
 own language. The match percentage and the post's banner are both shown, so the same artwork can
 be checked across channels at a glance.
 
-Two honest limits worth knowing before you trust a number:
+One honest limit worth knowing before you trust a number:
 
-- **Facebook is the fragile half.** It is read from a page that changes, so it will need attention.
-  When it cannot be read the channel reports *unknown* and its cells stay blank — never a cross,
-  because "we could not look" and "nothing was posted" are different facts.
-- **Instagram's public endpoint is rate-limited per IP**, so the server-side attempt often fails.
-  That is why Instagram goes through the extension, where it is reliable.
+- **Facebook is still matched on content, not on time**, in the reconciliation engine — a deliberate
+  choice kept unchanged even though the browser reader above now gets a real timestamp for every post
+  it visits, not just the newest one. Changing *how a drop is matched* is a different, much
+  higher-risk change than changing *how a post is collected* (see `index.html`'s `reconcile()` for
+  exactly how much real-incident-driven tuning sits behind that decision), so collection was upgraded
+  on its own rather than bundled with a matching-strategy change. It is read from a page that changes,
+  so it will need attention over time regardless — when it cannot be read the channel reports
+  *unknown* and its cells stay blank, never a cross, because "we could not look" and "nothing was
+  posted" are different facts.
 
 Check history is kept in localStorage first, and mirrored to a shared Supabase row (`api/report`)
 when cloud storage is configured — so a run on one device is the same "today" every other device

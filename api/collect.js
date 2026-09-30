@@ -27,6 +27,7 @@
  */
 
 const ingest = require("../ingest-store.js");
+const browserReader = require("../browser-reader.js");
 
 const TIMEOUT = 12000;
 const MAX_CHANNELS = 40;
@@ -927,11 +928,107 @@ async function collectTelegram(ch) {
   return { posts, note: "Public preview shows roughly the last 20 posts" };
 }
 
-/* ═══════════════════ instagram (best effort) ═══════════════════ */
+/* ═══════════════════ instagram — free, server-side, via a real headless browser ═══════════════════
+   Instagram's public JSON endpoint (used further below) is refused from a datacenter IP — measured
+   directly, a 429 in ~25ms. What is NOT refused is a full page load: navigating a real (headless)
+   browser to the plain profile page renders the actual post grid, no login wall, no token, no paid
+   scraper — verified 2026-10-01 against this project's own channels. The grid's <a href="/p/…"> and
+   <a href="/reel/…"> links carry every recent post's id; each permalink page then carries its own
+   exact <time datetime> and a full caption in its og:description meta tag. Some accounts sit behind
+   Instagram's own age/content restriction wall regardless of who's asking — that is a property of
+   the account, not a block on this reader, and is reported as its own distinct failure rather than
+   folded into "Instagram refused us". */
+const IG_BROWSER_LIMIT = 8;               /* newest grid items whose permalink is actually opened */
+function igOgCaption(desc) {
+  /* Instagram's og:description reads "12 likes, 3 comments - handle on DATE: "the actual caption".",
+     trailing period included — a caption can itself contain quotes and colons, so anchoring past the
+     one guaranteed `: "` marker and then trimming from the LAST quote onward is sturdier than a
+     regex trying to describe the whole shape (a $-anchored one broke on that trailing period). */
+  const s = String(desc || "");
+  const i = s.indexOf(': "');
+  if (i === -1) return s;
+  const body = s.slice(i + 3);
+  const last = body.lastIndexOf('"');
+  return last === -1 ? body : body.slice(0, last);
+}
+async function collectInstagramBrowser(name) {
+  return browserReader.withPage(async page => {
+    await page.goto("https://www.instagram.com/" + encodeURIComponent(name) + "/", { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+
+    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => "");
+    if (/restricted profile|must be \d+ years old/i.test(bodyText)) {
+      throw new Error("Instagram puts this profile behind its own age/content restriction wall, " +
+        "which requires a logged-in session to view — an account-level flag, not a block on this reader.");
+    }
+    if (/\/accounts\/login/.test(page.url())) {
+      throw new Error("Instagram redirected this profile to a login page — treat as unknown, not empty.");
+    }
+
+    const hrefs = await page.$$eval('a[href*="/p/"], a[href*="/reel/"]',
+      els => [...new Set(els.map(e => e.getAttribute("href")))]);
+    if (!hrefs.length) {
+      throw new Error("Instagram's profile page rendered but no post grid was found — treat as unknown, not empty.");
+    }
+
+    const posts = [];
+    for (const href of hrefs.slice(0, IG_BROWSER_LIMIT)) {
+      const shortcode = (href.match(/\/(?:p|reel)\/([^/]+)/) || [])[1];
+      if (!shortcode) continue;
+      try {
+        await page.goto("https://www.instagram.com" + href, { waitUntil: "domcontentloaded" });
+        await page.waitForTimeout(1200);
+        const iso = await page.$eval("time", el => el.getAttribute("datetime")).catch(() => null);
+        if (!iso || isNaN(new Date(iso).getTime())) continue;
+        const desc = await page.$eval('meta[property="og:description"]', el => el.getAttribute("content")).catch(() => "");
+        const thumb = await page.$eval('meta[property="og:image"]', el => el.getAttribute("content")).catch(() => "");
+        posts.push({
+          externalId: shortcode, ts: new Date(iso).toISOString(),
+          kind: href.includes("/reel/") ? "reel" : "image",
+          text: igOgCaption(desc),
+          permalink: "https://www.instagram.com" + href,
+          thumb: thumb || "",
+        });
+      } catch (e) { /* one unreadable permalink must not take the rest of the grid down with it */ }
+    }
+    if (!posts.length) {
+      throw new Error("Instagram's grid rendered but no permalink could be read — treat as unknown, not empty.");
+    }
+    return { posts, source: "instagram-browser",
+             note: "read server-side via a headless browser page load — free, no login, no Apify" };
+  });
+}
+
+/* ═══════════════════ instagram — Apify / public-endpoint fallbacks ═══════════════════ */
 
 async function collectInstagram(ch) {
   const name = igTarget(ch);
   if (!name) throw new Error("No Instagram username could be read from this channel");
+
+  /* Browser-first: free, and measured to be MORE reliable than the plain public endpoint below,
+     which a datacenter IP gets refused outright. Cached the same ~15 min as the paid tiers below —
+     a real page load costs seconds of Vercel function time even though it costs no money, so a
+     burst of "Run daily check" clicks should still cost one browser run, not one each.
+     DISABLE_BROWSER_READER exists purely for the test suite: Playwright makes its own network calls
+     through a real Chromium process, which a stubbed global.fetch (see test/apify.test.js) cannot
+     see or intercept — without this escape hatch, a test built to exercise the Apify fallback in
+     isolation would instead launch a real browser against the real internet. */
+  if (!process.env.DISABLE_BROWSER_READER) {
+    const cacheName = "ig-browser:" + name.toLowerCase();
+    try {
+      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+      if (c && c.length) return { posts: c, source: "instagram-browser", note: "read via headless browser (cached ~15 min)" };
+    } catch (e) { /* cache miss is fine */ }
+    try {
+      const out = await collectInstagramBrowser(name);
+      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
+      return out;
+    } catch (browserErr) {
+      /* fall through to Apify (if configured) or the public endpoint — the browser note travels
+         with whichever of those answers, so a persistent browser-side failure is never silent */
+      var browserNote = String((browserErr && browserErr.message) || browserErr);
+    }
+  }
 
   /* Preferred when APIFY_TOKEN is set: Apify's Instagram scraper, which reads from a residential
      IP and does not depend on the fragile public web endpoint below (Instagram degrades or blocks
@@ -1015,22 +1112,83 @@ async function collectInstagram(ch) {
   return {
     posts,
     meta: { totalPosts: media.count, followers: (user.edge_followed_by || {}).count },
-    note: "Public endpoint — returns about the last 12 posts",
+    note: "Public endpoint — returns about the last 12 posts" +
+          (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : ""),
   };
 }
 
-/* ═══════════════════ facebook (via Apify) ═══════════════════ */
-
-/* Facebook has no public post list a server can read, and it will not serve one to a datacenter
-   IP even if it did. The extension can drive a logged-in tab, but that ties the channel to a
-   browser being open. When APIFY_TOKEN is set, Apify's Facebook scraper reads the page's recent
-   posts server-side instead, so the channel reports on its own — no browser, no extension. */
+/* ═══════════════════ facebook — free, server-side, via a real headless browser ═══════════════════
+   Facebook has no public post list a server can read via a plain fetch — mbasic is gone and /posts
+   sits behind a login wall. What a full headless-browser navigation CAN reach: the ordinary page
+   (facebook.com/<page>) renders its own recent posts/reels as plain links with no login prompt, and
+   each individual post's own permalink page carries a complete caption in its og:title meta tag plus
+   an exact "creation_time" (epoch seconds) in its markup — verified directly, 2026-10-01, against
+   this project's own Facebook pages. Free, no Apify, no extension. */
 function fbTarget(ch) {
   const u = String(ch.url || "").trim();
   if (/facebook\.com/i.test(u)) return u.replace(/\/+$/, "");
   const h = String(ch.handle || "").replace(/^@/, "").trim();
   return h ? "https://www.facebook.com/" + h : "";
 }
+
+const FB_BROWSER_LIMIT = 8;
+/* Facebook's og:title reads "<the actual caption> | <Page Name>" — the page name is appended by
+   Facebook itself, not written by whoever posted, so it is trimmed off the same way igOgCaption
+   trims Instagram's own added prefix. Cut at the LAST " | " so a caption that itself contains
+   " | " (rare, but captions are free text) still keeps its own content intact. */
+function fbOgTitle(title) {
+  const s = String(title || "");
+  const i = s.lastIndexOf(" | ");
+  return i === -1 ? s : s.slice(0, i);
+}
+async function collectFacebookBrowser(pageUrl) {
+  return browserReader.withPage(async page => {
+    await page.goto(pageUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+
+    if (/\/login\/|\/checkpoint\//.test(page.url())) {
+      throw new Error("Facebook redirected this page to a login/checkpoint wall — treat as unknown, not empty.");
+    }
+
+    const hrefs = await page.$$eval(
+      'a[href*="/reel/"], a[href*="/videos/"], a[href*="/posts/"]',
+      els => [...new Set(els.map(e => (e.getAttribute("href") || "").split("?")[0]))].filter(Boolean)
+    );
+    if (!hrefs.length) {
+      throw new Error("Facebook's page rendered but no post/reel/video links were found — treat as unknown, not empty.");
+    }
+
+    const posts = [];
+    const seen = new Set();
+    for (const href of hrefs.slice(0, FB_BROWSER_LIMIT)) {
+      const id = (href.match(/\/(?:reel|videos|posts)\/(?:[^/]+\/)?(\d{10,})\/?$/) || [])[1];
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const full = href.startsWith("http") ? href : "https://www.facebook.com" + href;
+      try {
+        await page.goto(full, { waitUntil: "domcontentloaded" });
+        await page.waitForTimeout(1200);
+        const html = await page.content();
+        const ct = (html.match(/"creation_time":(\d+)/) || [])[1];
+        if (!ct) continue;
+        const title = await page.$eval('meta[property="og:title"]', el => el.getAttribute("content")).catch(() => "");
+        const thumb = await page.$eval('meta[property="og:image"]', el => el.getAttribute("content")).catch(() => "");
+        posts.push({
+          externalId: id, ts: new Date(Number(ct) * 1000).toISOString(),
+          kind: href.includes("/reel/") ? "reel" : href.includes("/videos/") ? "video" : "text",
+          text: fbOgTitle(title), permalink: full, thumb: thumb || "",
+        });
+      } catch (e) { /* one unreadable permalink must not take the rest of the page down with it */ }
+    }
+    if (!posts.length) {
+      throw new Error("Facebook's page rendered links but no permalink could be read — treat as unknown, not empty.");
+    }
+    return { posts, source: "facebook-browser",
+             note: "read server-side via a headless browser page load — free, no login, no Apify" };
+  });
+}
+
+/* ═══════════════════ facebook — Apify fallback ═══════════════════ */
 
 /* FB items carry an ISO `time` and usually a numeric `timestamp` too — prefer the ISO one, and if
    only the number is there, read it as seconds or milliseconds by its magnitude. */
@@ -1044,7 +1202,30 @@ function fbWhen(it) {
 async function collectFacebook(ch) {
   const pageUrl = fbTarget(ch);
   if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
-  if (!process.env.APIFY_TOKEN) throw new Error("Facebook needs APIFY_TOKEN set to be read server-side");
+
+  /* Browser-first: free, and this is now the only Facebook reader that works without a paid token —
+     see the comment above collectFacebookBrowser. Cached ~15 min like every other browser/Apify tier
+     here, so a burst of "Run daily check" clicks costs one browser run, not one each.
+     DISABLE_BROWSER_READER: see the identical comment in collectInstagram — Playwright's own network
+     calls are invisible to a stubbed global.fetch, so the test suite needs a way to turn this tier
+     off to exercise the Apify fallback in isolation. */
+  if (!process.env.DISABLE_BROWSER_READER) {
+    const cacheName = "fb-browser:" + pageUrl.toLowerCase();
+    try {
+      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+      if (c && c.length) return { posts: c, source: "facebook-browser", note: "read via headless browser (cached ~15 min)" };
+    } catch (e) { /* cache miss is fine */ }
+    try {
+      const out = await collectFacebookBrowser(pageUrl);
+      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
+      return out;
+    } catch (browserErr) {
+      var browserNote = String((browserErr && browserErr.message) || browserErr);
+    }
+  }
+  if (!process.env.APIFY_TOKEN) {
+    throw new Error(browserNote || "Facebook needs a working browser reader or an APIFY_TOKEN to be read server-side.");
+  }
 
   const cacheName = "fb:" + pageUrl.toLowerCase();
   try {
@@ -1079,10 +1260,70 @@ async function collectFacebook(ch) {
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
   if (!posts.length) throw new Error("Apify returned no Facebook posts for this page — treat this as unknown, not empty.");
   try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
-  return { posts, source: "facebook-apify", note: "read server-side via Apify" };
+  return { posts, source: "facebook-apify",
+           note: "read server-side via Apify" + (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : "") };
 }
 
-/* ═══════════════════ tiktok (via Apify) ═══════════════════ */
+/* ═══════════════════ tiktok — free, server-side, via a real headless browser ═══════════════════
+   A plain fetch of a TikTok profile renders the page shell but not the video list — the list is
+   filled by an XHR TikTok's own client JS signs with a token (msToken/X-Bogus) that a raw request
+   cannot reproduce. A real headless browser sidesteps this differently than it does for Instagram/
+   Facebook: instead of getting past a block, it runs TikTok's ACTUAL client code, which signs and
+   fires that request itself — the profile page's own embedded state
+   (#__UNIVERSAL_DATA_FOR_REHYDRATION__) is then read directly out of the DOM once hydration settles,
+   the same well-documented JSON shape TikTok's own front end reads to render the grid.
+
+   UNVERIFIED FROM THIS PROJECT'S OWN NETWORK: TikTok is blocked at the TCP level from this dev
+   environment and from the user's home ISP (both India-based — see the free-route-findings note in
+   memory), so this could not be tested end-to-end the way the Instagram and Facebook readers above
+   were. It needs a real run from Vercel to confirm the hydration actually happens the way it does for
+   the other two platforms. Apify remains directly below as the safety net while that is unconfirmed. */
+const TT_BROWSER_LIMIT = 8;
+function ttWalkItemModule(data) {
+  /* the shape is roughly { ItemModule: { "<id>": { id, desc, createTime, author, video:{...} } } } */
+  const scope = data && (data.__DEFAULT_SCOPE__ || data);
+  const mod = (scope && scope["webapp.video-detail"] && scope["webapp.video-detail"].itemInfo) ? null
+            : (data && data.ItemModule) || (scope && scope.ItemModule)
+            || (scope && scope["webapp.user-detail"] && scope["webapp.user-detail"].itemModule) || null;
+  return mod || {};
+}
+async function collectTiktokBrowser(name) {
+  return browserReader.withPage(async page => {
+    await page.goto("https://www.tiktok.com/@" + encodeURIComponent(name), { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(4000);
+
+    const raw = await page.$eval("#__UNIVERSAL_DATA_FOR_REHYDRATION__", el => el.textContent).catch(() => null);
+    if (!raw) throw new Error("TikTok's rehydration data script was not found on the profile page — treat as unknown, not empty.");
+    let data;
+    try { data = JSON.parse(raw); } catch (e) { throw new Error("TikTok's rehydration data was not valid JSON — the page shape may have changed."); }
+
+    const items = ttWalkItemModule(data);
+    const ids = Object.keys(items);
+    if (!ids.length) throw new Error("TikTok's own rehydration data carried no videos for this profile — treat as unknown, not empty.");
+
+    const posts = ids.slice(0, TT_BROWSER_LIMIT).map(id => {
+      const it = items[id] || {};
+      const ms = Number(it.createTime) * 1000;
+      if (!it.id || !isFinite(ms)) return null;
+      const owner = String((it.author && (it.author.uniqueId || it.author)) || "").toLowerCase();
+      if (owner && owner !== name.toLowerCase()) return null;
+      const v = it.video || {};
+      return {
+        externalId: String(it.id), ts: new Date(ms).toISOString(), kind: "video",
+        text: String(it.desc || ""),
+        permalink: "https://www.tiktok.com/@" + name + "/video/" + it.id,
+        duration: num(v.duration), thumb: v.cover || v.originCover || "",
+        views: num(it.stats && it.stats.playCount), likes: num(it.stats && it.stats.diggCount),
+        comments: num(it.stats && it.stats.commentCount), reposts: num(it.stats && it.stats.shareCount),
+      };
+    }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (!posts.length) throw new Error("TikTok's rehydration data had entries but none matched this profile — treat as unknown, not empty.");
+    return { posts, source: "tiktok-browser",
+             note: "read server-side via a headless browser page load — free, no Apify (unverified from this network — see code comment)" };
+  });
+}
+
+/* ═══════════════════ tiktok — Apify fallback ═══════════════════ */
 
 /* TikTok blocks server requests and has no free public feed, but Apify's scraper reads a profile's
    recent videos server-side — same shape as the Facebook/Instagram readers, same APIFY_TOKEN, same
@@ -1090,7 +1331,24 @@ async function collectFacebook(ch) {
 async function collectTiktok(ch) {
   const name = ttTarget(ch);
   if (!name) throw new Error("No TikTok username could be read from this channel");
-  if (!process.env.APIFY_TOKEN) throw new Error("TikTok needs APIFY_TOKEN set to be read server-side");
+
+  if (!process.env.DISABLE_BROWSER_READER) {
+    const cacheName = "tt-browser:" + name.toLowerCase();
+    try {
+      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
+      if (c && c.length) return { posts: c, source: "tiktok-browser", note: "read via headless browser (cached ~15 min)" };
+    } catch (e) { /* cache miss is fine */ }
+    try {
+      const out = await collectTiktokBrowser(name);
+      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
+      return out;
+    } catch (browserErr) {
+      var browserNote = String((browserErr && browserErr.message) || browserErr);
+    }
+  }
+  if (!process.env.APIFY_TOKEN) {
+    throw new Error(browserNote || "TikTok needs a working browser reader or an APIFY_TOKEN to be read server-side.");
+  }
 
   const cacheName = "tt:" + name.toLowerCase();
   try {
@@ -1126,7 +1384,8 @@ async function collectTiktok(ch) {
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
   if (!posts.length) throw new Error("Apify returned no TikTok posts for @" + name + " — treat this as unknown, not empty.");
   try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
-  return { posts, source: "tiktok-apify", note: "read server-side via Apify" };
+  return { posts, source: "tiktok-apify",
+           note: "read server-side via Apify" + (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : "") };
 }
 
 /* ═══════════════════ telegram bot (1:1 DMs, via a user session) ═══════════════════ */
@@ -1215,10 +1474,9 @@ async function collectViber(ch) {
 /* Facebook is collectable, just not from here — the extension handles it. TikTok is not
    collectable at all: it refuses server requests and the extension does not cover it either.
    Saying "use the extension" for TikTok would send someone to a tool that will never report it,
-   so the two cases are kept distinct. */
-const BROWSER_ONLY = {
-  facebook: "Facebook has no public post list any more — collect this one with the browser extension",
-};
+   so the two cases are kept distinct. Facebook used to live here too — see collectFacebookBrowser
+   for why it no longer needs the extension or a paid token at all. */
+const BROWSER_ONLY = {};
 /* Nothing is outright unsupported any more — TikTok now reads server-side via Apify (collectTiktok)
    when APIFY_TOKEN is set, and reports "unknown" honestly when it is not. Kept for future platforms. */
 const UNSUPPORTED = {};
@@ -1277,11 +1535,9 @@ async function collectOne(ch, cutoff, pushedAll) {
     return { ...base, source: "unsupported", unsupported: true, note: UNSUPPORTED[ch.platform] };
   }
 
-  /* Facebook is browser-only ONLY when there is no server-side reader for it. With APIFY_TOKEN set
-     it reads server-side (collectFacebook), so it falls through to the collector map instead. */
-  const browserNote = BROWSER_ONLY[ch.platform];
-  if (browserNote && !(ch.platform === "facebook" && process.env.APIFY_TOKEN)) {
-    return { ...base, source: "browser-required", browserRequired: true, note: browserNote };
+  const browserOnlyNote = BROWSER_ONLY[ch.platform];
+  if (browserOnlyNote) {
+    return { ...base, source: "browser-required", browserRequired: true, note: browserOnlyNote };
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
