@@ -15,7 +15,16 @@
  * dev via `node dev-server.js`) the ordinary Playwright-managed Chromium already on disk is used
  * instead — nothing extra to configure beyond `npx playwright install chromium` once.
  */
-const { chromium: playwrightChromium } = require("playwright-core");
+/* Both requires are lazy — deferred until a browser is actually launched, not run when this module
+   is first loaded. Two reasons: requiring this file at all (api/collect.js does, unconditionally)
+   must never be what breaks YouTube/Telegram/X/Viber if these two packages ever have an install or
+   native-binary problem on a given host; and any failure then surfaces as a normal thrown error from
+   withPage(), caught by the same try/catch every caller already has around a browser-reader call
+   (see collect.js), with a message that actually names what went wrong — instead of a module-load
+   crash with no caller to report it. */
+function loadPlaywright() {
+  return require("playwright-core").chromium;
+}
 
 /* Pinned to the playwright-core version in package.json — @sparticuz/chromium follows Chromium's own
    release cycle, not semver, so an upgrade of one needs a matching upgrade of the other (see its
@@ -31,7 +40,14 @@ function launchArgs() {
   if (launchArgsPromise) return launchArgsPromise;
   launchArgsPromise = (async () => {
     if (process.env.VERCEL) {
-      const sparticuz = require("@sparticuz/chromium-min");
+      /* @sparticuz/chromium-min publishes itself as "type": "module" — a plain CommonJS require()
+         of it either throws ERR_REQUIRE_ESM outright or confuses a build-time bundler trying to
+         trace a require graph (this project is CommonJS throughout, no "type": "module" of its
+         own). A dynamic import() is the supported way to load an ESM package from CJS; its default
+         export is the Chromium class itself (confirmed: Object.keys(await import(...)) is
+         ["default","inflate","setupLambdaEnvironment"], with .args / .executablePath() as statics
+         on the default export, not on the module namespace). */
+      const { default: sparticuz } = await import("@sparticuz/chromium-min");
       return { args: sparticuz.args, executablePath: await sparticuz.executablePath(CHROMIUM_PACK_URL) };
     }
     /* local dev: playwright-core finds the browser Playwright's own installer already put in the
@@ -65,7 +81,18 @@ async function withPage(fn, opt) {
   await acquire();
   let browser;
   try {
-    const { args, executablePath } = await launchArgs();
+    let playwrightChromium, args, executablePath;
+    try {
+      playwrightChromium = loadPlaywright();
+      ({ args, executablePath } = await launchArgs());
+    } catch (setupErr) {
+      /* Named explicitly rather than let a bare module-load error bubble up looking like a generic
+         crash — this is the one failure mode that could otherwise go completely unreported, since
+         everything calling withPage() reports whatever message lands in its catch block verbatim. */
+      throw new Error("Browser reader setup failed (" +
+        String((setupErr && setupErr.message) || setupErr) + ") — is playwright-core / " +
+        "@sparticuz/chromium-min actually installed on this deployment?");
+    }
     browser = await playwrightChromium.launch({ args, executablePath, headless: true });
     const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 1400 }, locale: "en-US" });
     /* Content verification, not rendering — a reel's video file or a page's web fonts tell this
