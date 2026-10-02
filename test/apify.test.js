@@ -236,6 +236,41 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     check(!calls.some(c => /twitterapi\.io|^https:\/\/x\.com/.test(c.url)), "no other X route is touched when Apify answers");
   }
 
+  console.log("\n── everything a reader hands over is kept, not just the time");
+  {
+    await wipeCache();
+    /* trimmed from real items of 2026-10-02 */
+    const { payload } = await collect([IG, FB, TT, X], {
+      ig: [{ shortCode: "Dd_hwMhigc-", timestamp: ago(5), type: "Video", productType: "clips", ownerUsername: "sportsfcvn",
+             caption: "⚔️ Pháp có thể xuyên thủng?", hashtags: ["UEFANationsLeague", "football"], ownerFullName: "SportsFC Vietnam",
+             displayUrl: "https://scontent.cdninstagram.com/a.jpg", dimensionsWidth: 640, dimensionsHeight: 1136 }],
+      fb: [{ post_id: "2007732463267140", time: ago(5), text: "", topLevelReelUrl: "https://facebook.com/reel/2007732463267140/",
+             playCountRounded: 6, video: { id: "2007732463267140", playable_duration_in_ms: 42533 },
+             playback_video: { width: 1080, height: 1920, thumbnailImage: { uri: "https://scontent.fbcdn.net/t.jpg" } },
+             video_owner: { name: "Sportsfc Vietnam" } }],
+      tt: [{ id: "7692052842718301473", createTimeISO: ago(5), text: "https://sfc.my/r/nv6ucWwT\n⚔️ Pháp", textLanguage: "vi",
+             authorMeta: { name: "sportsfc.fans", nickName: "SportsFC Vietnam" }, collectCount: 3, shareCount: 1,
+             hashtags: [{ name: "uefanationsleague" }, { name: "football" }],
+             musicMeta: { musicName: "original sound", musicOriginal: true }, videoMeta: { duration: 42, width: 576, height: 1024 } }],
+      x:  [{ id: "2106004528071905449", createdAt: ago(5), text: "https://t.co/xqpM0sIMyD ⚔️ Pháp", lang: "vi", quoteCount: 2, bookmarkCount: 4,
+             author: { username: "Sportsfcvn", name: "SportsFc" },
+             entities: { hashtags: [{ text: "UEFANationsLeague" }], urls: [{ expanded_url: "https://sfc.my/r/uNnRFnFN" }] },
+             media: [{ type: "video", durationMillis: 42533, mediaUrl: "https://pbs.twimg.com/ext_tw_video_thumb/1/pu/img/a.jpg" }] }],
+    });
+    const at = id => payload.results.find(r => r.channelId === id).posts[0];
+    const ig = at("ig"), fb = at("fb"), tt = at("tt"), x = at("x");
+    check(ig.hashtags.join(",") === "UEFANationsLeague,football" && ig.author === "SportsFC Vietnam" && ig.w === 640 && ig.h === 1136,
+      "Instagram: hashtags, account name, size", JSON.stringify(ig));
+    check(fb.thumb === "https://scontent.fbcdn.net/t.jpg" && fb.author === "Sportsfc Vietnam" && fb.duration === 43 && fb.views === 6,
+      "Facebook: the reel's cover, page name, length and plays", JSON.stringify(fb));
+    check(tt.link === "https://sfc.my/r/nv6ucWwT" && tt.hashtags.join(",") === "uefanationsleague,football" && tt.saves === 3 &&
+          tt.platformLang === "vi" && tt.music === "" && tt.author === "SportsFC Vietnam",
+      "TikTok: content link, hashtags, saves, TikTok's own language, no 'original sound' noise", JSON.stringify(tt));
+    check(x.thumb.startsWith("https://pbs.twimg.com/") && x.link === "https://sfc.my/r/uNnRFnFN" && x.duration === 43 &&
+          x.quotes === 2 && x.saves === 4 && x.hashtags[0] === "UEFANationsLeague" && x.platformLang === "vi",
+      "X: the media preview (mediaUrl), the link behind t.co, length, quotes, bookmarks", JSON.stringify(x));
+  }
+
   console.log("\n── a whole check: four platforms, one request, one total");
   {
     await wipeCache();

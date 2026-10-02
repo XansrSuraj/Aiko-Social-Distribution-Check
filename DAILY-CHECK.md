@@ -115,6 +115,28 @@ alone was $0.176 per run, Instagram $0.0675), roughly five times today's price p
 many checks it still buys. `GET /api/apify-usage` returns the same as JSON — read-only, it never
 starts a run.
 
+### What each post brings back — all shown in the report's **Content** tab
+
+The same paid runs return far more than a timestamp, and all of it is kept and shown, one card per
+post, at no extra cost:
+
+| Platform | What comes back |
+|---|---|
+| Instagram | cover image, full caption, hashtags, likes, comments, type (reel/carousel/photo), size, account name |
+| TikTok | cover, caption, hashtags, plays, likes, comments, shares, saves, length, TikTok's own language tag, sound |
+| X | video preview, text, hashtags, the real `sfc.my` link behind `t.co`, views, likes, replies, reposts, quotes, bookmarks, length |
+| Facebook | reel cover, plays, length, page name — **no caption** (the Reels tab does not carry one) |
+| YouTube / Telegram | thumbnail, caption, views (and likes, comments, length on YouTube) |
+
+A Facebook reel's card shows **the same drop's caption from a channel in the same language**,
+labelled as borrowed — the content is identical across channels, so this says what went out
+without paying for it. Reading Facebook's own caption is possible (one extra Apify read per new reel,
+about $0.005 each — roughly +$0.05 per daily check) but is not switched on.
+
+Pictures are drawn through this site (`/api/thumb`): Instagram's image CDN tells browsers not to
+show its images on any other site. Platforms' image links are signed and expire after a few days,
+after which the card shows the platform's icon instead.
+
 ## 4. What the test run returned
 
 All 10 readable channels answered. The same drops line up across platforms at the same minutes

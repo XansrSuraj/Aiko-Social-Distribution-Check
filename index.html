@@ -411,6 +411,52 @@ table.dc .mt{color:var(--tx3);font-size:11.5px}
 table.dc input.cnt{width:58px;padding:4px 7px;border:1px solid var(--ln);border-radius:7px;
   background:var(--bg);color:var(--tx);font:inherit;text-align:center}
 .dc-empty{padding:26px 18px;text-align:center;color:var(--tx2);font-size:13px}
+
+/* ── content tab: one card per post, everything its reader handed over ── */
+.dc-cfilt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.dc-cf{font:inherit;font-size:12px;font-weight:700;padding:6px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--ln);background:var(--surf2);color:var(--tx2);display:inline-flex;align-items:center;gap:6px}
+.dc-cf:hover{color:var(--tx)}
+.dc-cf.on{background:color-mix(in srgb,var(--a1) 14%,var(--surf2));color:var(--a1);border-color:color-mix(in srgb,var(--a1) 45%,var(--ln))}
+.dc-cf .ct{font-size:10px;padding:0 6px}
+.dc-ctot{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--tx2);margin:0 2px 12px}
+.dc-ctot b{color:var(--tx)}
+.dc-cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.dc-card{border:1px solid var(--ln);border-radius:15px;background:var(--surf2);overflow:hidden;display:flex;
+  flex-direction:column;box-shadow:var(--s1);min-width:0}
+.dc-card.bad{border-color:color-mix(in srgb,var(--amb) 55%,var(--ln))}
+.dc-cimg{position:relative;display:block;aspect-ratio:16/10;background:var(--surf3);overflow:hidden}
+.dc-cimg img{width:100%;height:100%;object-fit:cover;display:block}
+.dc-cph{position:absolute;inset:0;display:none;place-items:center}
+.dc-cimg.noimg .dc-cph{display:grid}
+.dc-cdur{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;
+  font-weight:750;padding:2px 7px;border-radius:7px}
+.dc-cb{padding:10px 12px 12px;display:flex;flex-direction:column;gap:7px;min-width:0;flex:1}
+.dc-ch1{display:flex;align-items:center;gap:8px;min-width:0;font-size:12.5px}
+.dc-ch1 b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dc-ch1 .mono{font-size:11.5px;color:var(--tx2);white-space:nowrap}
+.chip.sm{width:24px;height:24px;border-radius:7px;font-size:9px}
+.chip.sm i.si{font-size:12px}
+.chip.sm svg{width:13px;height:13px}
+.dc-cpills{display:flex;flex-wrap:wrap;gap:5px}
+.dc-ctext{font-size:12.5px;line-height:1.5;color:var(--tx);white-space:pre-line;overflow-wrap:anywhere;cursor:pointer;
+  display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.dc-ctext.open{display:block;-webkit-line-clamp:unset}
+.dc-ctext.borrowed{color:var(--tx2)}
+.dc-ctext.empty{color:var(--tx3);font-style:italic;cursor:default}
+.dc-cnote{font-size:11px;color:var(--tx3)}
+.dc-ctags{display:flex;flex-wrap:wrap;gap:4px}
+.dc-ctags span{font-size:11px;color:var(--a1);background:color-mix(in srgb,var(--a1) 9%,transparent);padding:1px 7px;border-radius:999px}
+.dc-cst{display:flex;flex-wrap:wrap;gap:4px 11px;font-size:11.5px;color:var(--tx2)}
+.dc-cst span{display:inline-flex;align-items:center;gap:4px}
+.dc-cst b{color:var(--tx);font-weight:750}
+.dc-cst svg{width:13px;height:13px}
+.dc-cln{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11.5px;margin-top:auto;padding-top:2px}
+.dc-cln a{color:var(--a1);text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-weight:700;min-width:0}
+.dc-cln a:hover{text-decoration:underline}
+.dc-cln svg{width:12px;height:12px;flex:none}
+.dc-cln .by{color:var(--tx3)}
+@media (max-width:560px){.dc-cgrid{grid-template-columns:1fr}}
 /* the four tabs differ wildly in height, and without a floor the whole modal snapped taller and
    shorter as you moved between them, throwing the footer buttons around under the cursor */
 .dc-panel{min-height:340px}
@@ -935,15 +981,30 @@ function pushReport(){
   }, 400);
 }
 
+/* The whole store travels in one shared report row (capped at 2 MB server-side) and no window looks
+   back more than a week, so posts older than this are dropped rather than kept for ever. */
+const POST_KEEP_DAYS = 14;
 function mergePosts(channelId, incoming){
   const have = checks.posts[channelId] || [];
-  const seen = new Set(have.map(p => p.externalId));
-  const add = (incoming || []).filter(p => p.externalId && p.ts && !seen.has(p.externalId));
-  if(!add.length) return 0;
+  const byId = new Map(have.map(p => [p.externalId, p]));
+  let added = 0;
+  for(const p of (incoming || [])){
+    if(!p || !p.externalId || !p.ts) continue;
+    const old = byId.get(p.externalId);
+    if(!old){ added++; byId.set(p.externalId, p); continue; }
+    /* A post read again brings today's counters, and a newer reader may bring what an older one
+       lacked (a thumbnail, hashtags). The fresh read wins field by field — but an empty field never
+       wipes out a filled one. */
+    const merged = { ...old };
+    for(const [k, v] of Object.entries(p)) if(v !== null && v !== undefined && v !== "") merged[k] = v;
+    byId.set(p.externalId, merged);
+  }
+  const keepFrom = Date.now() - POST_KEEP_DAYS * 86400e3;
   /* newest first, and capped so one busy channel cannot grow the store without bound */
-  checks.posts[channelId] = [...have, ...add]
+  checks.posts[channelId] = [...byId.values()]
+    .filter(p => !(new Date(p.ts).getTime() < keepFrom))
     .sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 400);
-  return add.length;
+  return added;
 }
 
 /* ── language ──────────────────────────────────────────────────────────────
@@ -2322,8 +2383,9 @@ const CELL = {
      next run judges it normally. */
   unseen:{ g:"·", cls:"none", t:"outside what this channel's read covered — not judged, and not counted against it" },
 };
-const TABS = [["sum", "Summary"], ["drops", "What went out"], ["log", "Post log"], ["chan", "Per channel"]];
+const TABS = [["sum", "Summary"], ["drops", "What went out"], ["content", "Content"], ["log", "Post log"], ["chan", "Per channel"]];
 let dcTab = "sum";
+let dcContentPlat = "all", dcContentLang = "all";       // the Content tab's filters
 
 const nn = v => (v === null || v === undefined || v === "" ? "—" : v);
 const compact = n => n === null || n === undefined ? "—"
@@ -2335,6 +2397,12 @@ const num2 = v => v == null || v === "" ? "—" : (typeof v === "number" ? compa
 const dur = s => s === null || s === undefined ? "—"
   : s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s";
 const clean = t => String(t || "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+/* Thumbnails are drawn through this site (api/thumb): Instagram's image CDN tells browsers not to
+   draw its pictures on any other site, so linked directly they came out blank. A picture that still
+   fails (a signed link that has expired) is removed rather than left as a broken-image icon. */
+const thumbSrc = u => /^https:\/\//i.test(String(u || "")) && location.protocol.startsWith("http")
+  ? "api/thumb?u=" + encodeURIComponent(u) : String(u || "");
+const IMG_GONE = `onerror="this.closest('.dc-cimg')?this.closest('.dc-cimg').classList.add('noimg'):0;this.remove()"`;
 
 /* ── downloadable report card ────────────────────────────────────────────────
    A small, self-contained PNG of the day's check: every channel, each drop, what went out (a short
@@ -2751,7 +2819,7 @@ function dailyCheckModal(o){
       const th = (s.posts.find(p => p.thumb) || {}).thumb;
       return `<div class="dc-drop${s.missing.length ? " gap" : ""}">
         <div class="dc-dt">
-          ${th ? `<img class="dc-th" src="${esc(th)}" alt="" loading="lazy">` : ""}
+          ${th ? `<img class="dc-th" src="${esc(thumbSrc(th))}" alt="" loading="lazy" ${IMG_GONE}>` : ""}
           <div style="min-width:0;flex:1">
             <div class="dc-dt2"><b>${esc(hhmmss(s.at, rep.tz))}</b>
               <span class="dc-pill un">${esc(s.kinds.join(", ") || "post")}</span>
@@ -2841,9 +2909,107 @@ function dailyCheckModal(o){
                 title="open the post"><i data-lucide="arrow-up-right"></i></a>` : ""}</td>
         </tr>`;
       }).join("")}</tbody></table></div>
-      <div class="dc-key"><span>${logPosts.length} post(s) with timestamps.
-        Facebook is absent here — it prints "2h", never an instant, so its posts have no time to log.</span></div>`
+      <div class="dc-key"><span>${logPosts.length} post(s) with timestamps. The Content tab shows each
+        one in full — picture, whole caption, hashtags and every counter.</span></div>`
       : `<div class="dc-empty">No timestamped posts in this window.</div>`;
+
+    /* ── tab: content — every post every reader brought back, as a card ─────────────
+       Everything a reader handed over for a post, in one place: its picture, the whole caption,
+       hashtags, every counter, the content link and which drop it belongs to. Facebook's Reels tab
+       carries no caption at all, so a reel that sits in a drop shows that drop's caption from a
+       channel in the SAME language — labelled as borrowed, never passed off as the reel's own. */
+    const slotIx = p => rep.slots.findIndex(s => s.posts.some(q => q.channelId === p.channelId && q.externalId === p.externalId));
+    /* Instagram's own page summary leads with 'N likes, N comments - handle on DATE: "' and closes
+       the quote — that wrapper is the platform's, not the caption, so it is not shown as if it were */
+    const IG_WRAP = /^\s*[\d.,]+[KkMm]?\s+likes?,\s*[\d.,]+[KkMm]?\s+comments?\s+-\s+[\w.]+\s+on\s+[^:]{3,40}:\s*["“]/;
+    const capOf = p => {
+      let t = String((p && p.text) || "");
+      if(IG_WRAP.test(t)) t = t.replace(IG_WRAP, "").replace(/["”]\.?\s*$/, "");
+      return t.replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    };
+    const tagsOf = p => (Array.isArray(p.hashtags) && p.hashtags.length ? p.hashtags
+      : [...String(p.text || "").matchAll(/#([\p{L}\p{N}_]+)/gu)].map(m => m[1])).slice(0, 12);
+    const linkOf = p => p.link || (String(p.text || "").match(/https?:\/\/(?!t\.co\/)[^\s)]+/) || [""])[0];
+    const borrowCap = (p, c, si) => {
+      if(si < 0) return null;
+      const q = rep.slots[si].posts.find(q => q.channelId !== p.channelId && capOf(q) && chanOf(q.channelId).lang === c.lang);
+      return q ? { text:capOf(q), from:chanOf(q.channelId).name || q.channelId } : null;
+    };
+    const LANG_NAME = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese" };
+
+    const cPlats = [...new Set(logPosts.map(p => chanOf(p.channelId).platform).filter(Boolean))];
+    const cLangs = [...new Set(logPosts.map(p => chanOf(p.channelId).lang).filter(Boolean))];
+    const platSel = cPlats.indexOf(dcContentPlat) !== -1 ? dcContentPlat : "all";
+    const langSel = cLangs.indexOf(dcContentLang) !== -1 ? dcContentLang : "all";
+    const cPosts = logPosts.filter(p => { const c = chanOf(p.channelId);
+      return (platSel === "all" || c.platform === platSel) && (langSel === "all" || c.lang === langSel); });
+    const total = f => cPosts.reduce((n, p) => typeof p[f] === "number" ? n + p[f] : n, 0);
+    const has = f => cPosts.some(p => typeof p[f] === "number");
+
+    const card = p => {
+      const c = chanOf(p.channelId), pf = platform(c.platform);
+      const si = slotIx(p);
+      const own = capOf(p);
+      const lent = own ? null : borrowCap(p, c, si);
+      const d = detectLang(p.text);
+      const bad = !!(c.lang && d.lang && d.lang !== c.lang);
+      const tags = tagsOf(p), link = linkOf(p), href = safeUrl(p.permalink || "");
+      const st = (v, ic, label) => v === null || v === undefined || v === "" ? ""
+        : `<span title="${esc(label)}"><i data-lucide="${ic}"></i><b>${esc(num2(v))}</b></span>`;
+      return `<div class="dc-card${bad ? " bad" : ""}">
+        <a class="dc-cimg${p.thumb ? "" : " noimg"}"${href ? ` href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="open the post"` : ""}>
+          ${p.thumb ? `<img src="${esc(thumbSrc(p.thumb))}" alt="" loading="lazy" ${IMG_GONE}>` : ""}
+          <span class="dc-cph"><span class="chip" style="--c:${esc(pf.color)}">${iconOf(pf.icon, initials(pf.name))}</span></span>
+          ${p.duration ? `<span class="dc-cdur">${esc(dur(p.duration))}</span>` : ""}
+        </a>
+        <div class="dc-cb">
+          <div class="dc-ch1"><span class="chip sm" style="--c:${esc(pf.color)}">${iconOf(pf.icon, initials(pf.name))}</span>
+            <b title="${esc(c.name || p.channelId)}">${esc(c.name || p.channelId)}</b><span class="sp"></span>
+            <span class="mono" title="${esc(p.ts)}">${esc(fmtWhen(p.ts, rep.tz))}</span></div>
+          <div class="dc-cpills">
+            <span class="dc-pill un">${esc(p.kind || "post")}</span>
+            ${d.lang ? `<span class="dc-pill ${bad ? "short" : "un"}" title="${esc(bad ? "caption is " + (LANG_NAME[d.lang] || d.lang) + ", channel is " + (LANG_NAME[c.lang] || c.lang) : d.why || "")}">${esc(d.lang)}${bad ? " ≠ " + esc(c.lang) : ""}</span>` : ""}
+            ${si >= 0 ? `<span class="dc-pill ok" title="part of the ${esc(rep.slots[si].time)} drop">drop ${esc(rep.slots[si].time)}</span>`
+              : p.viaCaption ? `<span class="dc-pill okc">matched by caption</span>` : `<span class="dc-pill un" title="no other channel posted at this time">no drop</span>`}
+          </div>
+          ${own ? `<div class="dc-ctext" title="click to show all of it">${esc(own)}</div>`
+            : lent ? `<div class="dc-ctext borrowed" title="click to show all of it">${esc(lent.text)}</div>
+                      <div class="dc-cnote">${esc(pf.name)} gives no caption for this post — this is the same drop's caption on ${esc(lent.from)}</div>`
+            : `<div class="dc-ctext empty">no caption</div>`}
+          ${tags.length ? `<div class="dc-ctags">${tags.map(t => `<span>#${esc(t)}</span>`).join("")}</div>` : ""}
+          <div class="dc-cst">${st(p.views, "eye", "views / plays")}${st(p.likes != null ? p.likes : p.reactions, "heart", "likes")}${
+            st(p.comments, "message-circle", "comments")}${st(p.reposts, "repeat-2", "shares / reposts")}${
+            st(p.quotes, "quote", "quotes")}${st(p.saves, "bookmark", "saves / bookmarks")}</div>
+          <div class="dc-cln">
+            ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer"><i data-lucide="arrow-up-right"></i>open post</a>` : ""}
+            ${link && safeUrl(link) ? `<a href="${esc(safeUrl(link))}" target="_blank" rel="noopener noreferrer" title="${esc(link)}"><i data-lucide="link"></i>${esc(pretty(link))}</a>` : ""}
+            ${p.music ? `<span class="by" title="sound"><i data-lucide="music"></i> ${esc(p.music)}</span>` : ""}
+            ${p.author ? `<span class="by">by ${esc(p.author)}</span>` : ""}
+          </div>
+        </div>
+      </div>`;
+    };
+
+    const tabContent = logPosts.length ? `
+      <div class="dc-cfilt">
+        ${["all", ...cPlats].map(k => `<button class="dc-cf${platSel === k ? " on" : ""}" data-cplat="${esc(k)}">${
+            k === "all" ? "All platforms" : esc(platform(k).name)} <span class="ct">${
+            logPosts.filter(p => k === "all" || chanOf(p.channelId).platform === k).length}</span></button>`).join("")}
+        <span class="sp"></span>
+        ${cLangs.length > 1 ? ["all", ...cLangs].map(l => `<button class="dc-cf${langSel === l ? " on" : ""}" data-clang="${esc(l)}">${
+            l === "all" ? "All languages" : esc(LANG_NAME[l] || l)}</button>`).join("") : ""}
+      </div>
+      <div class="dc-ctot"><span><b>${cPosts.length}</b> post(s)</span>${
+        has("views") ? `<span><b>${esc(compact(total("views")))}</b> views</span>` : ""}${
+        has("likes") ? `<span><b>${esc(compact(total("likes")))}</b> likes</span>` : ""}${
+        has("comments") ? `<span><b>${esc(compact(total("comments")))}</b> comments</span>` : ""}${
+        has("reposts") ? `<span><b>${esc(compact(total("reposts")))}</b> shares</span>` : ""}</div>
+      ${cPosts.length ? `<div class="dc-cgrid">${cPosts.map(card).join("")}</div>`
+                     : `<div class="dc-empty">Nothing matches these filters.</div>`}
+      <div class="dc-key"><span>Every post read in this window, newest first — counters are as of the last read.
+        Click a caption to show all of it. Pictures come through this site; a platform's signed link
+        expires after a few days, after which its card shows the platform's icon instead.</span></div>`
+      : `<div class="dc-empty">No posts collected in this window yet — press <b>Run everything</b>.</div>`;
 
     /* ── tab: per channel ── */
     const tabChan = rep.rows.map(r => {
@@ -2904,8 +3070,8 @@ function dailyCheckModal(o){
           const stat = (v, label) => v == null || v === "" ? ""
             : `<span class="dc-sn">${esc(typeof v === "number" ? compact(v) : v)} ${label}</span>`;
           return `<div class="dc-p${bad ? " bad" : ""}">
-            ${p.thumb ? `<img class="dc-th sm${p.borrowedThumb ? " borrowed" : ""}" src="${esc(p.thumb)}"
-                 alt="" loading="lazy" title="${p.borrowedThumb
+            ${p.thumb ? `<img class="dc-th sm${p.borrowedThumb ? " borrowed" : ""}" src="${esc(thumbSrc(p.thumb))}"
+                 alt="" loading="lazy" ${IMG_GONE} title="${p.borrowedThumb
                    ? "this drop's artwork, taken from another channel — not read from this one"
                    : "read from this channel's own post"}">` : ""}
             <div style="min-width:0;flex:1">
@@ -2943,7 +3109,7 @@ function dailyCheckModal(o){
                               : meta.unsupported ? "nothing can read this one" : meta.note || "")}</td></tr>`;
         }).join("")}</tbody></table></div>` : "";
 
-    const panel = { sum:tabSum, drops:tabDrops, log:tabLog, chan:tabChan }[dcTab] || tabSum;
+    const panel = { sum:tabSum, drops:tabDrops, content:tabContent, log:tabLog, chan:tabChan }[dcTab] || tabSum;
 
     openModal(`
       <div class="mh"><h3><i data-lucide="calendar-check"></i>Daily check — ${esc(o.name)}</h3>${X}</div>
@@ -2986,7 +3152,7 @@ function dailyCheckModal(o){
         ${sources}
 
         <div class="dc-tabs">${TABS.map(([k, l]) => `<button class="dc-tab${dcTab === k ? " on" : ""}"
-          data-tab="${k}">${esc(l)}${k === "log" ? ` <span class="ct">${logPosts.length}</span>` : ""}${
+          data-tab="${k}">${esc(l)}${k === "log" || k === "content" ? ` <span class="ct">${logPosts.length}</span>` : ""}${
           k === "drops" ? ` <span class="ct">${rep.slots.length}</span>` : ""}</button>`).join("")}</div>
 
         <div class="dc-panel">${panel}</div>
@@ -3001,6 +3167,9 @@ function dailyCheckModal(o){
     mo.className = "mo xw";
 
     mo.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { dcTab = b.dataset.tab; draw(); });
+    mo.querySelectorAll("[data-cplat]").forEach(b => b.onclick = () => { dcContentPlat = b.dataset.cplat; draw(); });
+    mo.querySelectorAll("[data-clang]").forEach(b => b.onclick = () => { dcContentLang = b.dataset.clang; draw(); });
+    mo.querySelectorAll(".dc-ctext:not(.empty)").forEach(el => el.onclick = () => el.classList.toggle("open"));
 
     const all = mo.querySelector("#dcAll");
     all.onclick = async () => {

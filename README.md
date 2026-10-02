@@ -42,6 +42,7 @@ and Apify over plain REST, and feeds are parsed directly.
 | `index.html` | the whole dashboard + report UI |
 | `api/collect.js` | `POST` read recent posts per channel — every platform, all server-side, with each Apify run's cost |
 | `api/apify-usage.js` | `GET` Apify credit used / left this month and recent run costs (read-only) |
+| `api/thumb.js` | `GET` a post's thumbnail passed through this site — Instagram's CDN forbids other sites from drawing its images; only the platforms' own CDNs are served |
 | `api/ingest.js` | `POST` accept posts pushed in for any channel; `GET` read them back |
 | `api/notif.js` | `POST` a phone forwards one Viber notification, routed to its community |
 | `api/report.js` | `GET`/`PUT` the shared daily-check report row |
@@ -159,8 +160,11 @@ be entered. It is a floor: if every channel missed the same drop, no one saw it.
 evidence counts — a number read off a Facebook page is a suggestion until you confirm it, because
 one misread page must not be able to decide every other channel's verdict.
 
-Four tabs: **Summary** (the matrix and the problem list), **What went out** (each drop with its
-thumbnail, a caption per language, and the exact minute it reached each channel), **Post log**
+Five tabs: **Summary** (the matrix and the problem list), **What went out** (each drop with its
+thumbnail, a caption per language, and the exact minute it reached each channel), **Content**
+(a card for every post every reader brought back — picture, whole caption, hashtags, views,
+likes, comments, shares, saves, the `sfc.my` content link and the drop it belongs to, filterable
+by platform and language), **Post log**
 (every post with a second-level timestamp, language, type, views, likes, comments, length and a
 link) and **Per channel**. Everything each platform will give up is pulled and shown — YouTube
 even reveals whether a video is a Short, through the `/shorts/` form of its own link.

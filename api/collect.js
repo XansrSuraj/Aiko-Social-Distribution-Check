@@ -933,13 +933,22 @@ function xParseApify(items, handle) {
     const who = String(a.username || a.userName || a.screen_name || t.authorUsername || "").toLowerCase();
     if (who && who !== me) return null;
     const media = Array.isArray(t.media) ? t.media : [];
-    const mtype = String((media[0] && (media[0].type || media[0].mediaType)) || "").toLowerCase();
+    const m0 = media[0] || {};
+    const mtype = String(m0.type || m0.mediaType || "").toLowerCase();
+    const ent = t.entities || {};
+    const text = String(t.text || t.full_text || "");
     return {
       externalId: id, ts: new Date(ms).toISOString(),
       kind: /video|gif/.test(mtype) ? "video" : mtype ? "photo" : "text",
-      text: String(t.text || t.full_text || ""),
+      text,
       views: num(t.viewCount), likes: num(t.likeCount), comments: num(t.replyCount), reposts: num(t.retweetCount),
-      thumb: (media[0] && (media[0].url || media[0].media_url_https || media[0].thumbnail)) || "",
+      quotes: num(t.quoteCount), saves: num(t.bookmarkCount),
+      duration: m0.durationMillis ? Math.round(m0.durationMillis / 1000) : null,
+      /* xquik names the media preview mediaUrl; the other two are X's own legacy names */
+      thumb: m0.mediaUrl || m0.media_url_https || m0.thumbnail || "",
+      /* the caption's own link is a t.co wrapper; X hands over what it expands to */
+      link: ((Array.isArray(ent.urls) && ent.urls[0] && ent.urls[0].expanded_url) || firstLink(text)),
+      hashtags: tagList(ent.hashtags), author: a.name || "", platformLang: t.lang || "",
       permalink: t.url || ("https://x.com/" + handle + "/status/" + id),
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
@@ -1177,6 +1186,8 @@ function igParseApify(items, name) {
       likes: num(it.likesCount), comments: num(it.commentsCount),
       views: num(it.videoViewCount || it.videoPlayCount), duration: num(it.videoDuration),
       thumb: it.displayUrl || "",
+      hashtags: tagList(it.hashtags), link: firstLink(it.caption), author: it.ownerFullName || "",
+      w: num(it.dimensionsWidth), h: num(it.dimensionsHeight),
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
@@ -1255,8 +1266,10 @@ function fbWhen(it) {
 }
 
 /* apify/facebook-reels-scraper — the page's Reels tab (see apify-actors.js for why not its post
-   timeline). Each item: post_id, time (ISO) and creation_time (epoch s), text (also message.text),
-   topLevelReelUrl, playCountRounded, video.playable_duration_in_ms. */
+   timeline). Each item: post_id, time (ISO) and creation_time (epoch s), topLevelReelUrl,
+   playCountRounded, video.playable_duration_in_ms, the cover image under playback_video, and the
+   page's name under video_owner. The text field exists but the Reels tab leaves it empty — checked
+   field by field on SportsFC's own reels (2026-10-02): no caption is carried anywhere in the item. */
 function fbParseApify(items) {
   return items.map(it => {
     if (!it || apifyItemError(it)) return null;
@@ -1266,13 +1279,20 @@ function fbParseApify(items) {
     const id = String(it.post_id || video.id || it.topLevelReelUrl || "").trim();
     if (!id || !isFinite(ms)) return null;
     const share = (it.if_should_change_url_for_reels || {}).shareable_url;
+    const pv = it.playback_video || {};
+    const text = String(it.text || (it.message && it.message.text) || "");
     return {
       externalId: id, ts: new Date(ms).toISOString(), kind: "reel",
-      text: String(it.text || (it.message && it.message.text) || ""),
+      text,
       permalink: it.topLevelReelUrl || share || it.shareable_url || it.topLevelUrl || "",
       views: num(it.playCountRounded),
-      duration: video.playable_duration_in_ms ? Math.round(video.playable_duration_in_ms / 1000) : null,
-      thumb: it.thumbnail || it.thumbnailUrl || "",
+      duration: video.playable_duration_in_ms ? Math.round(video.playable_duration_in_ms / 1000)
+              : pv.length_in_second ? Math.round(pv.length_in_second) : null,
+      thumb: (pv.thumbnailImage && pv.thumbnailImage.uri)
+          || (pv.preferred_thumbnail && pv.preferred_thumbnail.image && pv.preferred_thumbnail.image.uri)
+          || video.first_frame_thumbnail || it.thumbnail || "",
+      author: (it.video_owner && it.video_owner.name) || "", link: firstLink(text),
+      w: num(pv.width), h: num(pv.height),
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
@@ -1310,8 +1330,15 @@ function ttParseApify(items, name) {
       text: String(it.text || ""),
       permalink: it.webVideoUrl || ("https://www.tiktok.com/@" + name + "/video/" + id),
       views: num(it.playCount), likes: num(it.diggCount), comments: num(it.commentCount), reposts: num(it.shareCount),
+      saves: num(it.collectCount),
       duration: num(it.videoMeta && it.videoMeta.duration),
       thumb: (it.videoMeta && (it.videoMeta.coverUrl || it.videoMeta.originalCoverUrl)) || "",
+      hashtags: tagList(it.hashtags), link: firstLink(it.text),
+      author: (it.authorMeta && it.authorMeta.nickName) || "", platformLang: it.textLanguage || "",
+      /* only a borrowed sound is worth naming — "original sound" by the channel itself says nothing */
+      music: it.musicMeta && !it.musicMeta.musicOriginal
+        ? [it.musicMeta.musicName, it.musicMeta.musicAuthor].filter(Boolean).join(" — ") : "",
+      w: num(it.videoMeta && it.videoMeta.width), h: num(it.videoMeta && it.videoMeta.height),
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
@@ -1586,6 +1613,14 @@ function stripHtml(s) {
 }
 
 const num = v => (v === undefined || v === null || v === "" ? null : Number(v));
+
+/* The extra detail the Apify readers hand over, in one shape across platforms — hashtags (without
+   the #, at most 12), the content link a caption leads with (SportsFC's sfc.my short link), the
+   account's display name. Kept deliberately small: every post is stored in the shared report row. */
+const tagList = arr => [...new Set((Array.isArray(arr) ? arr : []).map(h =>
+  String(typeof h === "string" ? h : (h && (h.name || h.text || h.title)) || "").replace(/^#/, "").trim()
+).filter(Boolean))].slice(0, 12);
+const firstLink = text => (String(text || "").match(/https?:\/\/(?!t\.co\/)[^\s)]+/) || [""])[0];
 
 /* Telegram abbreviates once a post gets traction: "1.2K", "3.4M". null rather than 0 when it is
    absent, so "not reported" never renders as a real zero. */
