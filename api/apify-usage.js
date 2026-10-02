@@ -13,6 +13,9 @@
  *
  *   -> { …, settle: [ { runId, actor, status, usd, settled } ] }
  *
+ * GET /api/apify-usage?sample=<runId>&n=2  — the first items one of this project's runs produced, as
+ * the actor wrote them (long strings trimmed). Read-only; it never starts a run.
+ *
  * usedUsd comes from Apify's own account limits and can trail a run that just finished by a minute
  * or so; each run's usd is that run's own billed figure.
  */
@@ -43,6 +46,36 @@ async function call(path, params) {
 
 const usd = n => (typeof n === "number" && isFinite(n) ? Math.round(n * 1e6) / 1e6 : null);
 
+/* A run's items, trimmed for reading: long strings cut, long arrays shortened, deep nesting
+   summarised. Facebook items carry kilobytes of tracking blobs that say nothing to a person. */
+function shrink(v, depth) {
+  if (typeof v === "string") return v.length > 400 ? v.slice(0, 400) + `…(${v.length} chars)` : v;
+  if (!v || typeof v !== "object") return v;
+  if (depth > 4) return Array.isArray(v) ? `[${v.length} items]` : "{…}";
+  if (Array.isArray(v)) return v.slice(0, 4).map(x => shrink(x, depth + 1)).concat(v.length > 4 ? [`…+${v.length - 4} more`] : []);
+  const o = {};
+  for (const [k, x] of Object.entries(v)) o[k] = shrink(x, depth + 1);
+  return o;
+}
+
+/* GET ?sample=<runId>[&n=2] — the first items a run of one of this project's actors produced, as
+   the actor wrote them. Read-only: it reads an existing dataset, never starts a run. It exists to
+   see exactly which fields each scraper returns, so the dashboard can show all of them. */
+async function sample(res, runId, n) {
+  const run = await call("/actor-runs/" + runId);
+  const acts = await Promise.all(ACTORS.map(a => call("/acts/" + a).then(d => [d.id, a]).catch(() => null)));
+  const name = (acts.filter(Boolean).find(e => e[0] === run.actId) || [])[1];
+  if (!name) return res.status(200).json({ ok: false, error: "not a run of this project's actors" });
+  const u = new URL(API + "/datasets/" + run.defaultDatasetId + "/items");
+  u.searchParams.set("token", process.env.APIFY_TOKEN);
+  u.searchParams.set("clean", "1");
+  u.searchParams.set("limit", String(n));
+  const r = await fetch(u.toString());
+  const items = await r.json().catch(() => []);
+  return res.status(200).json({ ok: true, actor: name, status: run.status, itemCount: (run.stats || {}).datasetItems ?? null,
+                                items: (Array.isArray(items) ? items : []).map(it => shrink(it, 0)) });
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -55,6 +88,13 @@ module.exports = async (req, res) => {
   /* run ids are Apify's own 17-character ids; anything else is ignored rather than passed on */
   const q = (req.query && req.query.runs) || new URL(req.url || "/", "http://x").searchParams.get("runs") || "";
   const runIds = [...new Set(String(q).split(",").map(s => s.trim()).filter(s => /^[A-Za-z0-9]{8,32}$/.test(s)))].slice(0, 12);
+
+  const qp = name => (req.query && req.query[name]) || new URL(req.url || "/", "http://x").searchParams.get(name) || "";
+  const sampleId = String(qp("sample"));
+  if (/^[A-Za-z0-9]{8,32}$/.test(sampleId)) {
+    try { return await sample(res, sampleId, Math.max(1, Math.min(6, Number(qp("n")) || 2))); }
+    catch (e) { return res.status(200).json({ ok: false, error: String(e.message || e) }); }
+  }
 
   try {
     const [limits, me] = await Promise.all([call("/users/me/limits"), call("/users/me").catch(() => null)]);
