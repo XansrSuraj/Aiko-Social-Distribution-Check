@@ -1126,7 +1126,9 @@ async function collectTelegram(ch) {
    A run that produced nothing still cost something; that cost rides on the error (err.cost) so the
    per-check total stays honest. */
 async function apifyRead(platform, cacheName, input, parse, who) {
-  const source = platform + "-apify";
+  /* Facebook's reader names itself: the report matches it on time, which it never did for the
+     post-timeline scraper that also reported as "facebook-apify" (see index.html, fbByTime) */
+  const source = platform === "facebook" ? "facebook-reels" : platform + "-apify";
   const cached = await apifyCached(cacheName);
   if (cached) return { posts: cached, source, note: "read via Apify (cached ~15 min — no new charge)", cost: CACHED_COST };
   let out;
@@ -1483,7 +1485,7 @@ async function collectOne(ch, cutoff, pushedAll) {
   const paid = !!process.env.APIFY_TOKEN;
   const source = { youtube: "youtube-web", telegram: "telegram-web",
                    instagram: paid ? "instagram-apify" : "instagram-public", x: paid ? "x-apify" : "x-web",
-                   facebook: "facebook-apify",
+                   facebook: "facebook-reels",
                    tiktok: "tiktok-apify", tgbot: "telegram-mtproto", viber: "ingest" }[ch.platform];
   try {
     /* the window is handed to the collector so it can stop reading once it is past it —

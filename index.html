@@ -982,6 +982,11 @@ const fmtGap = m => m >= 1440 ? Math.round(m / 1440) + "d"
    When there is too little text to be sure, the post's own id is kept as the key instead, so two
    genuinely distinct short posts are never merged into one. */
 function contentKey(p){
+  /* A Facebook reel's own id is in its link whichever reader found it. The post timeline and the
+     Reels tab read the same reel with different ids, a minute apart, one with a caption and one
+     without — neither the id nor the caption signature would ever pair them. */
+  const reel = String((p && p.permalink) || "").match(/facebook\.com\/reel\/(\d+)/);
+  if(reel) return "r:" + reel[1];
   const min = p && p.ts ? new Date(p.ts).toISOString().slice(0, 16) : "";
   const txt = String((p && p.text) || "")
     .replace(/https?:\/\/\S+/g, " ")
@@ -1203,7 +1208,16 @@ function differentFixture(a, b){
    shares the "browser-hostile" reputation Facebook has — its collector reads a real per-post
    timestamp out of the profile page's own schema.org microdata, so it gets genuine instants and
    belongs on the timeline side, matched drop by drop like YouTube and Telegram, not on words. */
-const matchesByContent = c => c.platform === "facebook";
+/* Facebook was put on content because no reader of it could prove absence: the extension gets
+   captions without dependable times, and the post-timeline scraper skipped a whole day of posts on
+   one run (2026-10-02). The Reels-tab reader (source "facebook-reels") lists a page's reels newest
+   first with exact times — and no captions at all, so content matching would have nothing to work
+   on. A Facebook channel whose latest read came from it is therefore matched on time, exactly like
+   YouTube or TikTok, under the same covered-stretch rules; read any other way it stays on content.
+   The assumption this rests on: SportsFC publishes to Facebook as reels. A photo post would not be
+   on the Reels tab, and its drop would read as missing there. */
+const fbByTime = c => { const m = (checks.meta || {})[c.id]; return !!(m && m.ok !== false && m.source === "facebook-reels"); };
+const matchesByContent = c => c.platform === "facebook" && !fbByTime(c);
 /* Viber reaches us only as forwarded phone notifications: real per-post timestamps, but coverage
    of the window that cannot be depended on (a killed listener, a collapsed "3 new messages"
    bundle), and video posts that arrive as a bare "Video message" placeholder rather than a caption.
@@ -1974,7 +1988,9 @@ async function collectServer(o){
       checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
         browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
         dead:!!res.dead, at:Date.now(),
-        cost:cost && !cost.cached ? cost.usd : null, cached:!!(cost && cost.cached), partial:!!res.partialRead };
+        cost:cost && !cost.cached ? cost.usd : null, cached:!!(cost && cost.cached),
+        /* the name reconcile() reads: an Apify run cut off by its time budget proves no absence */
+        partialRead:!!res.partialRead };
       if(res.resolved && res.resolved.ytChannelId) checks.ytIds[res.channelId] = res.resolved.ytChannelId;
       if(res.ok){ ok++; added += mergePosts(res.channelId, res.posts); }
       else if(res.browserRequired) browser++;

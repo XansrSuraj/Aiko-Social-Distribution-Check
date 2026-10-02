@@ -102,7 +102,7 @@ It is live at this point and already usable — but data is still per-browser un
    | `SUPABASE_SERVICE_KEY` | for a shared report | the `service_role` key |
    | `INGEST_KEY` | if Viber / any push is used | a long random string; sent as `x-ingest-key` |
    | `VIBER_COMMUNITIES` | optional | `Name=viber:handle` pairs, comma-separated (defaults to the two SportsFC communities) |
-   | `APIFY_TOKEN` | for Facebook, Instagram, TikTok, X | an [Apify](https://apify.com) API token. These four platforms refuse a server's own requests, so they are read through Apify scrapers (`apify/facebook-posts-scraper`, `apify/instagram-post-scraper`, `clockworks/tiktok-scraper`, `xquik/x-tweet-scraper`). Billed per post returned — about **$0.10 per full daily check** (see [DAILY-CHECK.md](DAILY-CHECK.md) §3). Without it, Facebook and TikTok go to the extension, Instagram tries its public endpoint and X its free page read. |
+   | `APIFY_TOKEN` | for Facebook, Instagram, TikTok, X | an [Apify](https://apify.com) API token. These four platforms refuse a server's own requests, so they are read through Apify scrapers (`apify/facebook-reels-scraper`, `apify/instagram-post-scraper`, `clockworks/tiktok-scraper`, `xquik/x-tweet-scraper`). Billed per post returned — about **$0.10 per full daily check** (see [DAILY-CHECK.md](DAILY-CHECK.md) §3). Without it, Facebook and TikTok go to the extension, Instagram tries its public endpoint and X its free page read. |
    | `APIFY_MAX_POSTS` | optional | newest posts each Apify run asks for, per channel (default `6`, about two days). The one knob that sets the price of a check. |
    | `TWITTERAPI_KEY` | optional | a [twitterapi.io](https://twitterapi.io) key — X's second route, tried only if the Apify read fails. |
    | `X_SCRAPER` | optional | a scraping-proxy URL prefix (residential IP) for X's last, free route, e.g. `https://api.scraperapi.com/?api_key=KEY&url=`. |
@@ -188,7 +188,7 @@ Four things get flagged:
 |---|---|---|
 | YouTube | the official Data API, or the channel page if no key is set | a free `YOUTUBE_API_KEY` (the page read is refused from Vercel) |
 | Telegram | `t.me/s/<channel>`, the public preview | nothing |
-| Facebook | Apify `apify/facebook-posts-scraper` | `APIFY_TOKEN` |
+| Facebook | Apify `apify/facebook-reels-scraper` — the page's Reels tab | `APIFY_TOKEN` |
 | Instagram | Apify `apify/instagram-post-scraper` | `APIFY_TOKEN` |
 | TikTok | Apify `clockworks/tiktok-scraper` | `APIFY_TOKEN` |
 | X (Twitter) | Apify `xquik/x-tweet-scraper`, then twitterapi.io, then the free profile page | `APIFY_TOKEN` |
@@ -207,36 +207,41 @@ record. So these four are read by [Apify](https://apify.com) scrapers, which bil
   downloads, transcription or proxy add-ons: each is billed extra, and an empty date-filtered answer
   cannot tell "posted nothing" from "the scraper saw nothing".
 - **Exact cost on every result.** Runs start asynchronously so the run id is known; each result
-  carries Apify's own billed figure for its run (`cost.usd`, waited on until Apify settles it), and
-  the response totals them (`apifyCostUsd`). `GET /api/apify-usage` shows the month's credit.
+  carries Apify's own billed figure for its run (`cost.usd`), and the response totals them
+  (`apifyCostUsd`). Apify fills a bill in some time after the run stops, so a figure that has not
+  settled yet says so (`cost.settled: false`) and the dashboard asks again for the exact sum
+  (`GET /api/apify-usage?runs=…`). `GET /api/apify-usage` alone shows the month's credit.
 - **Bounded spend.** Every run has a `maxTotalChargeUsd` cap (twice the expected charge, or the
   actor's own minimum — $0.50 for TikTok) and a time budget; a run past it is aborted and whatever it
   already returned is used.
-- **Fits the free plan.** Memory is pinned per actor (Facebook/TikTok 2 GB, Instagram 512 MB, X 256 MB)
+- **Fits the free plan.** Memory is pinned per actor (TikTok 2 GB, Facebook 1 GB, Instagram 512 MB, X 256 MB)
   so a full check stays under the free plan's 8 GB concurrent limit; a start refused for memory is
   retried while the other runs finish.
 - **Cached 15 minutes** — a second press inside that window costs nothing.
 - **A profile the scraper cannot see says why** — Instagram's "Restricted profile" for an
   age-restricted account comes back as the channel's note, and the channel reads *unknown*.
 
-Measured on 2026-10-02, one full check of the SportsFC set costs **$0.098** (Facebook $0.031 per page,
-TikTok $0.023, Instagram $0.010 per readable account, X $0.001) — about 51 checks per $5 of free
+Measured on 2026-10-02, one full check of the SportsFC set costs **$0.096** (Facebook $0.030 per page,
+TikTok $0.023, Instagram $0.010 per readable account, X $0.001) — about 52 checks per $5 of free
 monthly credit. [DAILY-CHECK.md](DAILY-CHECK.md) §3 has the breakdown.
+
+**Facebook is read from the page's Reels tab**, not its post timeline: the post-timeline scraper,
+asked for a page's newest posts, once skipped a whole day of them. The Reels tab lists reels newest
+first with exact times but no captions — so this assumes SportsFC publishes to Facebook as reels.
 
 **The extension is a fallback, not a requirement.** When the server read of a Facebook, Instagram,
 TikTok or X channel fails (credit used up, no token), **Run everything** asks the Chrome extension
 for that channel only, if it is installed. It reads from the user's own browser and IP. No token,
 password or cookie is ever extracted or stored — the same thing that happens when you click a link.
 
-**Facebook is matched on content, not on time**, and marked **≈** rather than ✓ to keep the two
-apart. Its timestamps can prove a post was made and never that one was not, and trusting them for
-absence produced false missing-post alarms. A drop counts as delivered when one of the page's
-captions says the same thing, within the channel's own language. The match percentage and the
-post's banner are both shown, so the same artwork can be checked across channels at a glance. This
-is a deliberate choice in `reconcile()`, kept even though the Apify reader returns a real timestamp
-for every post — changing how a drop is matched is a separate, higher-risk change than changing how
-a post is collected. When a channel cannot be read it reports *unknown* and its cells stay blank,
-never a cross, because "we could not look" and "nothing was posted" are different facts.
+**How Facebook is matched depends on who read it.** Read from the Reels tab (the server), it has
+exact times and a complete newest-first list, and is matched on time like every other channel.
+Read by the extension, it has captions but no dependable times — those can prove a post was made
+and never that one was not — so it is matched on content and marked **≈** rather than ✓: a drop
+counts as delivered when one of the page's captions says the same thing, within the channel's own
+language. The same reel read both ways is counted once (paired by the reel id in its link). When a
+channel cannot be read it reports *unknown* and its cells stay blank, never a cross, because "we
+could not look" and "nothing was posted" are different facts.
 
 Check history is kept in localStorage first, and mirrored to a shared Supabase row (`api/report`)
 when cloud storage is configured — so a run on one device is the same "today" every other device

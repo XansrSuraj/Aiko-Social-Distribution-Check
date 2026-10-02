@@ -164,7 +164,7 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     ];
     const { res, calls } = await collect([FB], { fb: items });
     check(res.ok === true && res.posts.length === 3, "the page's recent reels come through", (res.posts || []).map(p => p.externalId).join(","));
-    check(res.source === "facebook-apify", "the run says it read via Apify", String(res.source));
+    check(res.source === "facebook-reels", "the run says it read the Reels tab via Apify", String(res.source));
     check(res.posts.map(p => p.externalId).join(",") === "540800875170696,540800875170698,540800875170697" &&
           res.posts.every(p => p.kind === "reel"), "newest first, every one a reel", res.posts.map(p => p.externalId).join(","));
     check(res.posts[0].views === 32000 && res.posts[0].duration === 30 && /reel\/3292750537522330/.test(res.posts[0].permalink),

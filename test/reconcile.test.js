@@ -853,6 +853,50 @@ ok(phantom.slots[0].present.indexOf("fbv") !== -1,
   "and the drop still counts it among the channels it reached",
   phantom.slots[0].present.join(","));
 
+/* ── Facebook read from its Reels tab ──────────────────────────────────────
+   The Reels-tab reader (source "facebook-reels") lists a page's reels newest first with exact
+   times and no captions — so it is matched on time like any timeline channel, and a drop it does
+   not have inside its covered stretch is a real miss. Read any other way (the old post-timeline
+   scraper, which skipped a whole day once, or the extension) Facebook stays on content. */
+console.log("\n── Facebook read from its Reels tab is matched on time");
+{
+  const RL = (id, mins) => ({ externalId: id, ts: ago(mins), kind: "reel", text: "",
+                              permalink: "https://facebook.com/reel/" + id + "/" });
+  const fbRun = (fbPosts, source) => {
+    const c = M.checks();
+    c.posts = { tgv: [P("t1", 60, VN_TEXT), P("t2", 300, VN_TEXT), P("t3", 900, VN_TEXT)],
+                ytv: [P("y1", 61, VN_TEXT), P("y2", 301, VN_TEXT), P("y3", 901, VN_TEXT)],
+                fbv: fbPosts };
+    c.counts = {}; c.captions = {}; c.confirms = {};
+    c.meta = { fbv: { ok: true, source, at: Date.now() } };
+    Object.assign(c, { tz: 7, win: 15, maxPer: 4 });
+    return M.reconcile(PH, { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 });
+  };
+  /* has the 60- and 900-minute drops, not the 300-minute one */
+  const r1 = fbRun([RL("901", 62), RL("903", 902)], "facebook-reels");
+  const fb1 = r1.rows.find(r => r.id === "fbv");
+  ok(fb1.mode === "timeline", "a Reels-tab read puts Facebook on the timeline", fb1.mode);
+  ok(fb1.cells.map(x => x.state).join("/") === "ok/miss/ok",
+    "textless reels are credited by time, and the drop it lacks is a cross", fb1.cells.map(x => x.state).join("/"));
+  ok(r1.alerts.some(a => a.kind === "missing" && a.id === "fbv") && r1.slots[1].missing.indexOf("fbv") !== -1,
+    "the miss raises an alert and the drop lists it");
+  ok(r1.slots.length === 3 && r1.rows.filter(r => r.id !== "fbv").every(r => r.cells.every(x => x.state === "ok")),
+    "and no other channel is touched by it", `${r1.slots.length} drop(s)`);
+
+  const r2 = fbRun([RL("901", 62), RL("903", 902)], "facebook-apify");
+  const fb2 = r2.rows.find(r => r.id === "fbv");
+  ok(fb2.mode !== "timeline" && !fb2.cells.some(x => x.state === "miss") && !r2.alerts.some(a => a.kind === "missing" && a.id === "fbv"),
+    "the old post-timeline read never accuses — no captions there means unknown, not a cross", fb2.mode);
+
+  /* the same reel read by both readers: a caption and a www link from one, neither from the other */
+  const twin = { externalId: "122142918363350058", ts: ago(63), kind: "reel", text: "Hai huyền thoại. Một cuộc tranh luận dài.",
+                 permalink: "https://www.facebook.com/reel/901/" };
+  const r3 = fbRun([RL("901", 62), twin, RL("903", 902)], "facebook-reels");
+  const fb3 = r3.rows.find(r => r.id === "fbv");
+  ok(fb3.count === 2 && fb3.cells.map(x => x.state).join("/") === "ok/miss/ok" && !r3.alerts.some(a => a.kind === "over"),
+    "one reel read by two readers counts once — paired by the reel id in its link", `count=${fb3.count}`);
+}
+
 /* ── the channel only a person can answer for ──────────────────────────────
    Viber has no public post list, no web client for the extension, and an encrypted desktop store.
    Every way of reading it is shut, so its cells are ticked by hand instead — against the drop they
