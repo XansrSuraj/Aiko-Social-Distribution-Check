@@ -64,9 +64,11 @@ Nothing to install — it serves `index.html` and routes `/api/*` to the handler
 
 Open <http://localhost:3000>, pick an organization, press **Daily check** → **Collect**.
 
-**Expected:** YouTube and Telegram channels fill in with real post counts. Facebook and TikTok
-rows say they need the extension. Instagram usually says the same — its public endpoint is
-rate-limited per IP and is deliberately treated as a bonus, not a dependency.
+**Expected:** YouTube and Telegram channels fill in with real post counts. With `APIFY_TOKEN` in
+`.env`, Facebook, Instagram, TikTok and X fill in too, and the toast says what the press cost on
+Apify (about $0.10 for the full SportsFC set; a second press within 15 minutes is served from cache
+for $0). Without the token, Facebook and TikTok say they need the extension, and Instagram usually
+does too — its public endpoint is rate-limited per IP.
 
 Things worth poking at:
 

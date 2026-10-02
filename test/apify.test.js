@@ -45,8 +45,9 @@ function fakeApify(itemsByActor, opts) {
   const record = (id, r, status) => {
     const n = (itemsByActor[r.key] || []).length;
     const late = o.lateCharges && r.polls < (o.lateCharges === true ? 2 : o.lateCharges);
+    const usdLate = late || (o.usdLag && r.polls < o.usdLag);      // events counted, dollars not yet
     return { id, status, defaultDatasetId: "ds-" + id,
-             usageTotalUsd: late ? 0 : COST[r.key], chargedEventCounts: { [ITEM_EVENT[r.key]]: late ? 0 : n } };
+             usageTotalUsd: usdLate ? 0 : COST[r.key], chargedEventCounts: { [ITEM_EVENT[r.key]]: late ? 0 : n } };
   };
   global.fetch = async (url, init) => {
     const u = String(url);
@@ -265,6 +266,12 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     check(res.ok && res.cost.usd === COST.ig && res.cost.settled === true && res.cost.events.post === 2,
       "the reported cost is the settled one", JSON.stringify(res.cost));
     check(payload.apifyCostUsd === COST.ig, "and so is the request total", String(payload.apifyCostUsd));
+
+    await wipeCache();
+    const lag = await collect([TT], { tt: [{ id: "7100", createTimeISO: ago(5), text: "c", authorMeta: { name: "sportsfc.fans" } }] },
+                              { usdLag: 3 });
+    check(lag.res.ok && lag.res.cost.usd === COST.tt && lag.res.cost.settled === true,
+      "events counted but dollars still $0 is not taken as settled", JSON.stringify(lag.res.cost));
   }
 
   console.log("\n── an actor that raises its minimum cap is met once, not left unread");

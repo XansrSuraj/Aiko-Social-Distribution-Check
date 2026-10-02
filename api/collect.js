@@ -237,9 +237,15 @@ async function apifyRun(platform, input) {
 
   /* Apify settles a run's charges a few seconds AFTER the run stops: read straight away, a run that
      returned six posts still showed { post: 0 } and $0 (measured 2026-10-02 — the figures caught up
-     a minute later). So the record is re-read until the per-item charge has caught up with the
-     items actually returned, for up to ~10 s; past that the figure is reported as not settled. */
-  const settled = r => ((r.chargedEventCounts || {})[a.itemEvent] || 0) >= items.length;
+     a minute later). The event counts and the dollar figure do not even settle together — a TikTok
+     run showed { result: 1, "actor-start": 1 } beside $0. So the record is re-read until the
+     per-item charge has caught up with the items returned AND any charged event shows up in the
+     dollar figure, for up to ~10 s; past that the figure is reported as not settled. */
+  const settled = r => {
+    const ev = r.chargedEventCounts || {};
+    const charged = Object.values(ev).some(n => n > 0);
+    return (ev[a.itemEvent] || 0) >= items.length && (!charged || r.usageTotalUsd > 0);
+  };
   let done = false;
   for (let i = 0; i < 7 && left() > 4000; i++) {
     if (i) await sleep(1500);

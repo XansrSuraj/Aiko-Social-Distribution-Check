@@ -5,7 +5,7 @@ recent posts, groups the ones that landed within minutes of each other into a si
 shows — drop by drop — which channel got it, which is **missing** it, and which got it **late**.
 
 There is nothing to configure in the browser. The channels it watches are fixed in code (the
-SportsFC set: YouTube, Telegram, X, Facebook, Instagram and Viber, in Vietnamese and English), so
+SportsFC set: YouTube, Telegram, X, Facebook, Instagram, TikTok and Viber, in Vietnamese and English), so
 the dashboard is exactly this: a hero, the channels it watches, and the report a run produces.
 Adding a channel is a one-line code change, not a UI.
 
@@ -25,27 +25,29 @@ Adding a channel is a one-line code change, not a UI.
 - **Shared report** — with cloud storage on, a run on one device is the same "today" every other
   device sees (a Supabase row via `api/report`); localStorage is the fallback, so an offline moment
   or an unconfigured deployment loses nothing
-- **Double fallbacks where a channel is fragile** — X is read server-side, and falls back to the
-  browser extension (the user's own IP) when a datacenter IP is refused; Viber is pushed in rather
+- **Everything server-side, cost on screen** — Facebook, Instagram, TikTok and X are read through
+  Apify; every run reports its own billed cost and the report shows the credit left. The browser
+  extension is only a fallback for a channel the server could not read; Viber is pushed in rather
   than read; anything pushed in to `/api/ingest` wins over reconstructing a feed
 - **Light / dark**, respects `prefers-reduced-motion`
 
 ## Stack
 
 Static HTML + CSS + vanilla JS, plus a handful of tiny Vercel serverless functions.
-**No npm dependencies** — the API talks to Supabase over plain REST, and feeds are parsed directly.
+**One npm dependency** (`telegram`, lazy-loaded for the bot reader only) — the API talks to Supabase
+and Apify over plain REST, and feeds are parsed directly.
 
 | | |
 |---|---|
 | `index.html` | the whole dashboard + report UI |
-| `api/collect.js` | `POST` read recent posts per channel — every platform, all server-side |
-| `browser-reader.js` | the shared headless-Chromium launcher `api/collect.js` uses for IG/FB/TikTok |
+| `api/collect.js` | `POST` read recent posts per channel — every platform, all server-side, with each Apify run's cost |
+| `api/apify-usage.js` | `GET` Apify credit used / left this month and recent run costs (read-only) |
 | `api/ingest.js` | `POST` accept posts pushed in for any channel; `GET` read them back |
 | `api/notif.js` | `POST` a phone forwards one Viber notification, routed to its community |
 | `api/report.js` | `GET`/`PUT` the shared daily-check report row |
 | `api/data.js` | `GET` storage mode + settings (used to detect cloud vs local) |
 | `ingest-store.js` | the pushed-in post store (Supabase row 2, or a local file) |
-| `extension/` | Chrome extension fallback for X/IG/FB, only used if the browser reader ever fails |
+| `extension/` | Chrome extension fallback for FB/IG/TikTok/X, only used when the server read of a channel fails |
 | `test/` | `npm test` — stubbed handlers plus a live parser check |
 
 Front-end libraries load from a CDN and are all **optional** — if they're blocked the app still
@@ -100,9 +102,10 @@ It is live at this point and already usable — but data is still per-browser un
    | `SUPABASE_SERVICE_KEY` | for a shared report | the `service_role` key |
    | `INGEST_KEY` | if Viber / any push is used | a long random string; sent as `x-ingest-key` |
    | `VIBER_COMMUNITIES` | optional | `Name=viber:handle` pairs, comma-separated (defaults to the two SportsFC communities) |
-   | `TWITTERAPI_KEY` | recommended for X | the preferred way to read X server-side. A [twitterapi.io](https://twitterapi.io) key — X blocks datacenter IPs outright, so a deployment cannot read the page itself; this dedicated API can. Sent as the `X-API-Key` header. When set it is used first, and its answer is cached ~10 min so repeated checks cost one paid call, not one each. |
-   | `X_SCRAPER` | optional fallback | only used when `TWITTERAPI_KEY` is not set — a scraping-proxy URL prefix (residential IP), e.g. `https://api.scraperapi.com/?api_key=KEY&url=`. The X profile URL is appended and fetched through it, used when a direct fetch comes back empty. |
-   | `APIFY_TOKEN` | recommended for Facebook + Instagram + TikTok | an [Apify](https://apify.com) API token. When set, Instagram, Facebook and TikTok are read server-side via Apify's scrapers (`apify/instagram-post-scraper`, `apify/facebook-posts-scraper`, `clockworks/tiktok-scraper`) instead of the fragile public IG endpoint and the browser extension. Answers are cached ~15 min, and runs are bounded to recent posts to stay fast and cheap. Without it, IG uses its public endpoint, FB stays extension-only, and TikTok reports unknown. |
+   | `APIFY_TOKEN` | for Facebook, Instagram, TikTok, X | an [Apify](https://apify.com) API token. These four platforms refuse a server's own requests, so they are read through Apify scrapers (`apify/facebook-posts-scraper`, `apify/instagram-post-scraper`, `clockworks/tiktok-scraper`, `xquik/x-tweet-scraper`). Billed per post returned — about **$0.10 per full daily check** (see [DAILY-CHECK.md](DAILY-CHECK.md) §3). Without it, Facebook and TikTok go to the extension, Instagram tries its public endpoint and X its free page read. |
+   | `APIFY_MAX_POSTS` | optional | newest posts each Apify run asks for, per channel (default `6`, about two days). The one knob that sets the price of a check. |
+   | `TWITTERAPI_KEY` | optional | a [twitterapi.io](https://twitterapi.io) key — X's second route, tried only if the Apify read fails. |
+   | `X_SCRAPER` | optional | a scraping-proxy URL prefix (residential IP) for X's last, free route, e.g. `https://api.scraperapi.com/?api_key=KEY&url=`. |
    | `ADMIN_PASSWORD` | optional | only if you want app-level gating on the report write on top of platform protection |
 
 5. **Deployments → ⋯ → Redeploy**
@@ -162,9 +165,10 @@ thumbnail, a caption per language, and the exact minute it reached each channel)
 link) and **Per channel**. Everything each platform will give up is pulled and shown — YouTube
 even reveals whether a video is a Short, through the `/shorts/` form of its own link.
 
-The **Sources** panel makes the two collectors explicit: it shows which has reported, and offers
-**Merge N waiting** when an extension run is sitting unread. **Delete report** clears everything
-so the next run starts clean.
+The **Sources** panel splits the channels into the free ones and the Apify ones, shows which have
+reported, and — for Apify — what the last press cost, the credit left this month and how many more
+checks that buys. It offers **Merge N waiting** when an extension run is sitting unread. **Delete
+report** clears everything so the next run starts clean.
 
 Four things get flagged:
 
@@ -182,86 +186,57 @@ Four things get flagged:
 
 | Platform | How | Needs |
 |---|---|---|
-| YouTube | the official Data API, or the channel page if no key is set | nothing (a free `YOUTUBE_API_KEY` is sturdier) |
+| YouTube | the official Data API, or the channel page if no key is set | a free `YOUTUBE_API_KEY` (the page read is refused from Vercel) |
 | Telegram | `t.me/s/<channel>`, the public preview | nothing |
-| X (Twitter) | the profile page's own schema.org microdata | nothing |
-| Instagram | a real headless browser loading the profile page — see below | nothing (falls back to Apify/extension if set up) |
-| Facebook | a real headless browser loading the page — see below | nothing (falls back to Apify/extension if set up) |
-| TikTok | a real headless browser loading the profile page — see below | nothing (unverified on some networks — see below) |
+| Facebook | Apify `apify/facebook-posts-scraper` | `APIFY_TOKEN` |
+| Instagram | Apify `apify/instagram-post-scraper` | `APIFY_TOKEN` |
+| TikTok | Apify `clockworks/tiktok-scraper` | `APIFY_TOKEN` |
+| X (Twitter) | Apify `xquik/x-tweet-scraper`, then twitterapi.io, then the free profile page | `APIFY_TOKEN` |
+| Telegram bot | a Telegram user session reading the bot's DMs | `TG_API_ID` / `TG_API_HASH` / `TG_SESSION` |
 | Viber | pushed in to `/api/ingest` by whatever publishes to it | a sender — see below |
 
-### Instagram, Facebook and TikTok are read server-side, for free, via a real browser
+### Facebook, Instagram, TikTok and X are read through Apify
 
-No employee laptop, no browser extension, and no paid scraping subscription are required for any
-channel any more. `api/collect.js` launches an actual headless Chromium (Playwright) and navigates it
-to the real page, the same way a person opening it in a tab would — which turns out to matter: these
-platforms refuse a plain server-side `fetch()` to their own data endpoints outright (Instagram's
-public JSON endpoint answers a datacenter IP with an instant 429), but a full page load is not
-refused. Verified directly against this project's own channels:
+All four refuse requests from a server's IP (Instagram answers a datacenter IP with HTTP 429 in about
+25 ms, X serves an empty page, TikTok a profile with no videos, Facebook a login wall). Free routes —
+mirrors, the platforms' embeds, and a real headless browser running on Vercel — were each built or
+measured and none produced a read from the server; [DAILY-CHECK.md](DAILY-CHECK.md) §5 has the
+record. So these four are read by [Apify](https://apify.com) scrapers, which bill per post returned:
 
-- **Instagram** — loads the profile page, reads the post/reel links straight out of the rendered
-  grid, then visits each one for its exact `<time datetime>` and full caption (`og:description`).
-  Some accounts sit behind Instagram's own age/content restriction wall regardless of who's asking
-  (verified: unrelated to this reader — a control account on the same network read perfectly fine);
-  that shows up as its own distinct note, never folded into "Instagram refused us."
-- **Facebook** — loads the page, reads its post/reel/video links, then visits each permalink for its
-  `creation_time` and caption (`og:title`).
-- **TikTok** — loads the profile page and reads its own `#__UNIVERSAL_DATA_FOR_REHYDRATION__` data
-  block directly (the same JSON TikTok's front end reads to draw the grid) — **not yet confirmed from
-  a live deployment.** TikTok is blocked at the network level (not just rate-limited) from this
-  project's dev environment and from the team's home ISP, so this path could only be built against
-  the documented page shape, not tested end-to-end the way Instagram and Facebook were. Run a real
-  daily check and check the TikTok channel's `note` field the first time — if it comes back
-  `tiktok-browser`, it worked; if it silently falls through to `tiktok-apify` or fails, the page shape
-  needs a look (`browser-reader.js` has the launcher, the extractor is `collectTiktokBrowser` in
-  `api/collect.js`).
+- **Newest `APIFY_MAX_POSTS` posts per channel** (default 6 — about two days). No date filters,
+  downloads, transcription or proxy add-ons: each is billed extra, and an empty date-filtered answer
+  cannot tell "posted nothing" from "the scraper saw nothing".
+- **Exact cost on every result.** Runs start asynchronously so the run id is known; each result
+  carries Apify's own billed figure for its run (`cost.usd`, waited on until Apify settles it), and
+  the response totals them (`apifyCostUsd`). `GET /api/apify-usage` shows the month's credit.
+- **Bounded spend.** Every run has a `maxTotalChargeUsd` cap (twice the expected charge, or the
+  actor's own minimum — $0.50 for TikTok) and a time budget; a run past it is aborted and whatever it
+  already returned is used.
+- **Fits the free plan.** Memory is pinned per actor (Facebook/TikTok 2 GB, Instagram 512 MB, X 256 MB)
+  so a full check stays under the free plan's 8 GB concurrent limit; a start refused for memory is
+  retried while the other runs finish.
+- **Cached 15 minutes** — a second press inside that window costs nothing.
+- **A profile the scraper cannot see says why** — Instagram's "Restricted profile" for an
+  age-restricted account comes back as the channel's note, and the channel reads *unknown*.
 
-This costs Vercel function time (a real page load, a few seconds each) but no money and no
-credentials — see `browser-reader.js` for the launcher (`playwright-core` + `@sparticuz/chromium-min`
-on Vercel, the ordinary locally-installed Chromium anywhere else via `npx playwright install
-chromium`). `APIFY_TOKEN` and the Chrome extension both still work as an optional fallback layer if
-the browser reader ever fails on a given run — nothing was removed, this is a new first tier in front
-of them.
+Measured on 2026-10-02, one full check of the SportsFC set costs **$0.098** (Facebook $0.031 per page,
+TikTok $0.023, Instagram $0.010 per readable account, X $0.001) — about 51 checks per $5 of free
+monthly credit. [DAILY-CHECK.md](DAILY-CHECK.md) §3 has the breakdown.
 
-**X needs no token and no login.** `x.com/<handle>` server-renders its recent posts as schema.org
-microdata — one `<article itemType="…/SocialMediaPosting">` each, carrying an exact ISO timestamp,
-the full text, the media, and the view / like / reply / repost counts. So X is read by the server
-like YouTube and Telegram, gets real per-post instants, and is matched drop by drop rather than on
-caption text. Two limits worth knowing: the render reaches back only a handful of posts (as few as
-3, rarely more than about 10, with no way to page further), and reposts are skipped — a repost is
-someone else's post on your page, and counting it would make a day of them read as delivered.
-
-No token, no password, no API key, and no cookie is ever extracted or stored. The extension runs
-in your own browser, on your own IP, with the session already there — the same thing that happens
-when you click a link.
-
-**X has a fallback for a datacenter IP.** The server reads X from a home IP fine, but X can refuse
-the datacenter IP a Vercel deployment runs on. When the server-side read of an X channel fails, the
-daily check asks the browser extension for that channel only — the extension fetches the same
-logged-out profile microdata from the user's own IP (`credentials:"omit"`, so it gets the render
-that carries the posts) and parses it with a copy of the server's parser. `test/x-ext.test.js` runs
-the same fixtures through both parsers so the copy cannot drift. A healthy server-side run never
-opens X twice.
+**The extension is a fallback, not a requirement.** When the server read of a Facebook, Instagram,
+TikTok or X channel fails (credit used up, no token), **Run everything** asks the Chrome extension
+for that channel only, if it is installed. It reads from the user's own browser and IP. No token,
+password or cookie is ever extracted or stored — the same thing that happens when you click a link.
 
 **Facebook is matched on content, not on time**, and marked **≈** rather than ✓ to keep the two
-apart. Its page HTML carries real timestamps but only for the newest post — three `creation_time`
-markers in 2.5 MB — so they can prove a post was made and never that one was not, and trusting
-them for absence produced false missing-post alarms. Captions are read off the rendered page
-instead, and a drop counts as delivered when one of them says the same thing, within the channel's
-own language. The match percentage and the post's banner are both shown, so the same artwork can
-be checked across channels at a glance.
-
-One honest limit worth knowing before you trust a number:
-
-- **Facebook is still matched on content, not on time**, in the reconciliation engine — a deliberate
-  choice kept unchanged even though the browser reader above now gets a real timestamp for every post
-  it visits, not just the newest one. Changing *how a drop is matched* is a different, much
-  higher-risk change than changing *how a post is collected* (see `index.html`'s `reconcile()` for
-  exactly how much real-incident-driven tuning sits behind that decision), so collection was upgraded
-  on its own rather than bundled with a matching-strategy change. It is read from a page that changes,
-  so it will need attention over time regardless — when it cannot be read the channel reports
-  *unknown* and its cells stay blank, never a cross, because "we could not look" and "nothing was
-  posted" are different facts.
+apart. Its timestamps can prove a post was made and never that one was not, and trusting them for
+absence produced false missing-post alarms. A drop counts as delivered when one of the page's
+captions says the same thing, within the channel's own language. The match percentage and the
+post's banner are both shown, so the same artwork can be checked across channels at a glance. This
+is a deliberate choice in `reconcile()`, kept even though the Apify reader returns a real timestamp
+for every post — changing how a drop is matched is a separate, higher-risk change than changing how
+a post is collected. When a channel cannot be read it reports *unknown* and its cells stay blank,
+never a cross, because "we could not look" and "nothing was posted" are different facts.
 
 Check history is kept in localStorage first, and mirrored to a shared Supabase row (`api/report`)
 when cloud storage is configured — so a run on one device is the same "today" every other device
@@ -399,6 +374,11 @@ posts to Viber still has to push here itself.
 Supabase pauses a free project after ~7 days with no activity; open the Supabase dashboard to
 resume it. A directory in daily use never hits this. If it becomes annoying,
 [Upstash Redis](https://upstash.com) has no pause and the same REST-only integration style.
+
+Apify's free plan gives $5 of credit per monthly cycle. At about $0.10 per full check that is one
+check a day with room to spare, but not two. When the credit runs out, the Apify channels report
+*unknown* (and fall back to the extension, if installed) until the cycle resets — never a false
+"nothing posted". The report's Sources panel shows the credit left.
 
 ## Local development
 

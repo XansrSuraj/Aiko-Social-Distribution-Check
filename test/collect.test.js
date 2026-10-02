@@ -25,7 +25,7 @@ const CHANNELS = [
   { id: "tg-fans", platform: "telegram",  url: "https://t.me/sportsfc_fans" },
   { id: "ig-vn",   platform: "instagram", url: "https://instagram.com/sportsfc.vn" },
   { id: "fb-vn",   platform: "facebook",  url: "https://facebook.com/sportsfc.vn" },
-  { id: "tt-fans", platform: "tiktok",    url: "https://tiktok.com/@sportsfc.fans" },
+  { id: "tt-vn",   platform: "tiktok",    url: "https://tiktok.com/@sportsfc.vn" },
   { id: "x-vn",    platform: "x",         url: "https://x.com/Sportsfcvn" },
   /* a channel id nothing has ever been pushed for, so this stays a statement about the empty
      store rather than about whatever happens to be sitting in it today */
@@ -39,7 +39,7 @@ const CHANNELS = [
 ];
 
 const MUST_COLLECT = ["yt-vn", "yt-fans", "tg-vn", "tg-fans", "x-vn"];
-const APIFY_CHANNELS = ["fb-vn", "ig-vn", "tt-fans"];   // server-side when APIFY_TOKEN is set
+const APIFY_CHANNELS = ["fb-vn", "ig-vn", "tt-vn"];   // server-side when APIFY_TOKEN is set
 
 const iso = s => !isNaN(new Date(s).getTime());
 
