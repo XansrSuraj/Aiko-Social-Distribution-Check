@@ -33,6 +33,9 @@ module.exports = async (req, res) => {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ ok: false, error: "Use GET." });
 
+  /* the free-route probe (probe-free.js) shares this function — see its header for why */
+  if (req.query && req.query.probe) return require("../probe-free.js")(req, res);
+
   const now = new Date();
   let lastSeen = null;
   let beats = [];

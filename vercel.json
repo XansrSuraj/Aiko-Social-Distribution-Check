@@ -11,5 +11,11 @@
     "deploymentEnabled": {
       "probe-results": false
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/probe-free",
+      "destination": "/api/health?probe=1"
+    }
+  ]
 }

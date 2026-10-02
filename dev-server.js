@@ -74,6 +74,8 @@ const server = http.createServer(async (req, res) => {
        this laptop itself, anything else is another device on the network, e.g. the phone. */
     const remote = (req.socket && req.socket.remoteAddress) || "?";
     const stamp = new Date().toTimeString().slice(0, 8);
+    /* the same rewrite vercel.json makes: the free-route probe lives in health's function */
+    if (api[1] === "probe-free") { api[1] = "health"; url.searchParams.set("probe", "1"); }
     const file = path.join(ROOT, "api", api[1] + ".js");
     if (!fs.existsSync(file)) {
       console.log(`  ${stamp}  ${req.method} /api/${api[1]}  from ${remote}  -> 404 no such route`);

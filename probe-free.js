@@ -2,6 +2,10 @@
  * GET /api/probe-free — which FREE (no key, no credit) route can actually read TikTok, Instagram
  * or X from this host?
  *
+ * Served as GET /api/health?probe=1 (and still at /api/probe-free, through a rewrite in
+ * vercel.json). It lives outside api/ because the Hobby plan deploys at most 12 functions, and
+ * a diagnostic is the one that can share another's.
+ *
  * WHAT IT FOUND (measured from Vercel, 2026-09-05 — re-run it before trusting any of this):
  *   TikTok    the profile page loads and gives the account's stats and secUid, but the itemList is
  *             served EMPTY; the item_list XHR that fills it answers 200-with-no-body unless the
