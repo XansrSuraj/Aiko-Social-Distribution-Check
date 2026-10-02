@@ -3,7 +3,7 @@
  * stubbed fetch that plays Apify's own API: POST /acts/{actor}/runs starts a run, GET
  * /actor-runs/{id} reports it (with usageTotalUsd — the run's billed cost), GET
  * /datasets/{id}/items hands back the items. The item fixtures reproduce the fields each actor
- * actually emits (apify/instagram-post-scraper at basicData, apify/facebook-posts-scraper,
+ * actually emits (apify/instagram-post-scraper at basicData, apify/facebook-reels-scraper,
  * clockworks/tiktok-scraper, xquik/x-tweet-scraper), not whole items — the mappers read a handful.
  *
  * What is pinned here is what would quietly cost a post, mis-count one, or spend money:
@@ -26,10 +26,10 @@ const ago = mins => new Date(Date.now() - mins * 60e3).toISOString();
 let pass = 0, fail = 0;
 const check = (good, label, extra) => { good ? pass++ : fail++; console.log(`  ${good ? "pass" : "FAIL"}  ${label}${extra ? "  — " + extra : ""}`); };
 
-const ACTOR_KEY = u => /instagram-post-scraper/.test(u) ? "ig" : /facebook-posts-scraper/.test(u) ? "fb"
+const ACTOR_KEY = u => /instagram-post-scraper/.test(u) ? "ig" : /facebook-reels-scraper/.test(u) ? "fb"
                      : /tiktok-scraper/.test(u) ? "tt" : /x-tweet-scraper/.test(u) ? "x" : null;
 const COST = { ig: 0.0102, fb: 0.031, tt: 0.0232, x: 0.0009 };
-const ITEM_EVENT = { ig: "post", fb: "post", tt: "result", x: "apify-default-dataset-item" };
+const ITEM_EVENT = { ig: "post", fb: "apify-default-dataset-item", tt: "result", x: "apify-default-dataset-item" };
 
 /* A fake Apify. opts.pending: the run answers RUNNING first and SUCCEEDED on the next poll.
    opts.startFail: a list of {status, message} answers the start call gives before it succeeds.
@@ -46,8 +46,11 @@ function fakeApify(itemsByActor, opts) {
     const n = (itemsByActor[r.key] || []).length;
     const late = o.lateCharges && r.polls < (o.lateCharges === true ? 2 : o.lateCharges);
     const usdLate = late || (o.usdLag && r.polls < o.usdLag);      // events counted, dollars not yet
+    /* usdPartial: events counted but the dollars hold only a start fee — X and Facebook did this */
+    const usdPart = o.usdPartial && r.polls < o.usdPartial;
     return { id, status, defaultDatasetId: "ds-" + id,
-             usageTotalUsd: usdLate ? 0 : COST[r.key], chargedEventCounts: { [ITEM_EVENT[r.key]]: late ? 0 : n } };
+             usageTotalUsd: usdLate ? 0 : usdPart ? 0.001 : COST[r.key],
+             chargedEventCounts: { [ITEM_EVENT[r.key]]: late ? 0 : n } };
   };
   global.fetch = async (url, init) => {
     const u = String(url);
@@ -149,26 +152,33 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
 
   console.log("\n── Facebook via Apify");
   {
+    /* the reels actor's own item shape (its README's output sample, trimmed to what is read) */
     const items = [
-      { postId: "101", url: "https://www.facebook.com/Sportsfcvn/posts/101", time: ago(45), text: "Trận cầu tâm điểm",
-        likes: 40, comments: 5, shares: 3, viewsCount: 900, media: [{ type: "Video", videoUrl: "https://video.fb/v.mp4", thumbnail: "https://fb/t.jpg" }] },
-      { postId: "102", timestamp: Math.floor((Date.now() - 200 * 60e3) / 1000), text: "just words", media: [] },
-      { postId: "103", url: "https://www.facebook.com/reel/103", time: ago(100), text: "a reel", media: [] },
+      { post_id: "540800875170696", time: ago(45), creation_time: Math.floor((Date.now() - 45 * 60e3) / 1000),
+        text: "Trận cầu tâm điểm", topLevelReelUrl: "https://facebook.com/reel/3292750537522330/",
+        playCountRounded: 32000, video: { id: "3292750537522330", playable_duration_in_ms: 30123 } },
+      { post_id: "540800875170697", creation_time: Math.floor((Date.now() - 200 * 60e3) / 1000),
+        message: { text: "caption only under message" },
+        if_should_change_url_for_reels: { shareable_url: "https://www.facebook.com/reel/3292750537522331" } },
+      { post_id: "540800875170698", time: ago(100), text: "an older reel", topLevelReelUrl: "https://facebook.com/reel/3292750537522332/" },
     ];
     const { res, calls } = await collect([FB], { fb: items });
-    check(res.ok === true && res.posts.length === 3, "the page's recent posts come through", (res.posts || []).map(p => p.externalId).join(","));
+    check(res.ok === true && res.posts.length === 3, "the page's recent reels come through", (res.posts || []).map(p => p.externalId).join(","));
     check(res.source === "facebook-apify", "the run says it read via Apify", String(res.source));
-    check(res.posts[0].externalId === "101" && res.posts[0].kind === "video", "a post with a video maps to video, newest first", res.posts[0].kind);
-    check(res.posts.find(p => p.externalId === "102").kind === "text", "a words-only post maps to text");
-    check(res.posts.find(p => p.externalId === "103").kind === "reel", "a /reel/ URL maps to reel");
-    check(res.posts[0].reposts === 3 && res.posts[0].views === 900, "shares and views land in their fields",
-      `shares=${res.posts[0].reposts} views=${res.posts[0].views}`);
-    const t2 = new Date(res.posts.find(p => p.externalId === "102").ts).getTime();
-    check(isFinite(t2) && Math.abs(Date.now() - t2 - 200 * 60e3) < 5 * 60e3, "a seconds-only timestamp is read correctly");
+    check(res.posts.map(p => p.externalId).join(",") === "540800875170696,540800875170698,540800875170697" &&
+          res.posts.every(p => p.kind === "reel"), "newest first, every one a reel", res.posts.map(p => p.externalId).join(","));
+    check(res.posts[0].views === 32000 && res.posts[0].duration === 30 && /reel\/3292750537522330/.test(res.posts[0].permalink),
+      "plays, length and the reel's own link land in their fields",
+      `views=${res.posts[0].views} dur=${res.posts[0].duration} link=${res.posts[0].permalink}`);
+    const p2 = res.posts.find(p => p.externalId === "540800875170697");
+    check(Math.abs(Date.now() - new Date(p2.ts).getTime() - 200 * 60e3) < 5 * 60e3 && p2.text === "caption only under message" &&
+          /reel\/3292750537522331/.test(p2.permalink),
+      "an epoch-only time, a caption under message.text and a shareable_url are all read", JSON.stringify(p2));
     const s = started(calls)[0];
-    check(s.url.includes("facebook-posts-scraper") && s.body.startUrls[0].url.includes("facebook.com/Sportsfcvn") &&
-          s.body.resultsLimit === 6 && s.body.captionText === false && !("onlyPostsNewerThan" in s.body),
-      "page URL passed, 6 posts, paid caption transcription off, no date filter", JSON.stringify(s.body));
+    check(s.url.includes("facebook-reels-scraper") && s.body.startUrls[0].url.includes("facebook.com/Sportsfcvn") &&
+          s.body.resultsLimit === 6 && Object.keys(s.body).length === 2,
+      "the Reels tab actor, page URL passed, 6 reels, nothing else", JSON.stringify(s.body));
+    check(q(s, "memory") === "1024", "memory pinned at the actor's own minimum", q(s, "memory"));
     check(res.cost && res.cost.usd === COST.fb, "the result carries the run's own billed cost", JSON.stringify(res.cost));
   }
 
@@ -231,7 +241,7 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     await wipeCache();
     const { payload } = await collect([IG, FB, TT, X], {
       ig: [{ shortCode: "Q1", timestamp: ago(5), type: "Image", caption: "a", ownerUsername: "sportsfcvn" }],
-      fb: [{ postId: "9", time: ago(5), text: "b" }],
+      fb: [{ post_id: "9", time: ago(5), text: "b" }],
       tt: [{ id: "8", createTimeISO: ago(5), text: "c", authorMeta: { name: "sportsfc.fans" } }],
       x:  [{ id: "7", createdAt: ago(5), text: "d", author: { username: "Sportsfcvn" } }],
     });
@@ -272,6 +282,17 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
                               { usdLag: 3 });
     check(lag.res.ok && lag.res.cost.usd === COST.tt && lag.res.cost.settled === true,
       "events counted but dollars still $0 is not taken as settled", JSON.stringify(lag.res.cost));
+
+    await wipeCache();
+    const part = await collect([FB], { fb: [{ post_id: "9", time: ago(5), text: "b" }, { post_id: "8", time: ago(6), text: "c" }] },
+                               { usdPartial: 2 });
+    check(part.res.ok && part.res.cost.usd === COST.fb && part.res.cost.settled === true,
+      "dollars holding only a start fee are not taken as settled either", JSON.stringify(part.res.cost));
+
+    await wipeCache();
+    const slow = await collect([FB], { fb: [{ post_id: "6", time: ago(5), text: "d" }] }, { usdPartial: 99 });
+    check(slow.res.ok && slow.res.cost.settled === false && slow.res.cost.runId && slow.res.cost.usd === 0.001,
+      "a bill still unsettled after the wait goes out marked settled:false, with its run id", JSON.stringify(slow.res.cost));
   }
 
   console.log("\n── an actor that raises its minimum cap is met once, not left unread");

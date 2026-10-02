@@ -112,23 +112,10 @@ const APIFY_API = "https://api.apify.com/v2";
 const APIFY_BUDGET_MS = 95000;          // run + dataset read; vercel.json gives api/collect 120 s
 const APIFY_MAX_POSTS = Math.max(1, Math.min(50, Math.floor(Number(process.env.APIFY_MAX_POSTS)) || 6));
 
-/* Free-plan ("FREE" tier) event prices, read from each actor's own pricing on 2026-10-02 — used only
-   to set a per-run spending cap at twice the expected charge. The cost actually REPORTED for a run
-   is Apify's own figure from the run record, never this estimate.
-     minCap    — the lowest maxTotalChargeUsd the actor accepts (its minimalMaxTotalChargeUsd). The
-                 TikTok actor refuses to start below $0.50 outright; that is only a ceiling, the run
-                 is still billed per video.
-     itemEvent — the event the actor bills once per dataset item; how a settled run is recognised. */
-const APIFY_ACTORS = {
-  instagram: { id: "apify~instagram-post-scraper", memory: 512,  start: 0,     perPost: 0.0017,  minCap: 0.005,  itemEvent: "post" },
-  facebook:  { id: "apify~facebook-posts-scraper", memory: 2048, start: 0.001, perPost: 0.005,   minCap: 0.0062, itemEvent: "post" },
-  tiktok:    { id: "clockworks~tiktok-scraper",    memory: 2048, start: 0.001, perPost: 0.0037,  minCap: 0.5,    itemEvent: "result" },
-  x:         { id: "xquik~x-tweet-scraper",         memory: 256,  start: 0,     perPost: 0.00015, minCap: 0,      itemEvent: "apify-default-dataset-item" },
-};
-const apifyExpectedUsd = platform => {
-  const a = APIFY_ACTORS[platform];
-  return a.start + a.perPost * APIFY_MAX_POSTS;
-};
+/* Which actor reads each platform, its memory, minimum cap and event prices: apify-actors.js,
+   shared with api/apify-usage.js. The prices only set each run's spending cap and decide when a
+   run's bill has settled — the cost REPORTED is always Apify's own figure from the run record. */
+const { APIFY_ACTORS, expectedUsd, isSettled } = require("../apify-actors.js");
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const TERMINAL = /^(SUCCEEDED|FAILED|ABORTED|TIMED-OUT)$/;
@@ -188,7 +175,7 @@ async function apifyRun(platform, input) {
   const a = APIFY_ACTORS[platform];
   const deadline = Date.now() + APIFY_BUDGET_MS;
   const left = () => deadline - Date.now();
-  let cap = Math.max(0.01, a.minCap, Math.round(apifyExpectedUsd(platform) * 2 * 10000) / 10000);
+  let cap = Math.max(0.01, a.minCap, Math.round(expectedUsd(a, APIFY_MAX_POSTS) * 2 * 10000) / 10000);
 
   /* Started with a bounded retry while the account's concurrent-memory cap is momentarily full —
      another channel's run from the same daily check may still be finishing. An actor that raises its
@@ -235,25 +222,18 @@ async function apifyRun(platform, input) {
     { clean: 1, format: "json" }, null, Math.max(8000, Math.min(left(), 20000)));
   const items = ds.status === 200 && Array.isArray(ds.json) ? ds.json : [];
 
-  /* Apify settles a run's charges a few seconds AFTER the run stops: read straight away, a run that
-     returned six posts still showed { post: 0 } and $0 (measured 2026-10-02 — the figures caught up
-     a minute later). The event counts and the dollar figure do not even settle together — a TikTok
-     run showed { result: 1, "actor-start": 1 } beside $0. So the record is re-read until the
-     per-item charge has caught up with the items returned AND any charged event shows up in the
-     dollar figure, for up to ~10 s; past that the figure is reported as not settled. */
-  const settled = r => {
-    const ev = r.chargedEventCounts || {};
-    const charged = Object.values(ev).some(n => n > 0);
-    return (ev[a.itemEvent] || 0) >= items.length && (!charged || r.usageTotalUsd > 0);
-  };
+  /* Apify fills in a run's bill some time after the run stops, and not in one step (see
+     apify-actors.js). The record is re-read for a few seconds in case it settles quickly; if not,
+     the figure goes out marked settled:false with its run id, and the dashboard asks
+     /api/apify-usage for the final figure a little later. */
   let done = false;
-  for (let i = 0; i < 7 && left() > 4000; i++) {
+  for (let i = 0; i < 5 && left() > 4000; i++) {
     if (i) await sleep(1500);
     try {
       const fin = await apifyCall("GET", `/actor-runs/${run.id}`, null, null, 6000);
       if (fin.status === 200 && fin.json && fin.json.data) run = fin.json.data;
     } catch (e) { /* keep the last record we had */ }
-    if ((done = settled(run))) break;
+    if ((done = isSettled(a, run, items.length))) break;
   }
 
   if (!items.length && run.status !== "SUCCEEDED") {
@@ -1272,24 +1252,25 @@ function fbWhen(it) {
   return NaN;
 }
 
-/* apify/facebook-posts-scraper: postId, time/timestamp, text, url, media[], counts. captionText is
-   off — it transcribes a video's speech, which this check never reads and which is billed extra. */
+/* apify/facebook-reels-scraper — the page's Reels tab (see apify-actors.js for why not its post
+   timeline). Each item: post_id, time (ISO) and creation_time (epoch s), text (also message.text),
+   topLevelReelUrl, playCountRounded, video.playable_duration_in_ms. */
 function fbParseApify(items) {
   return items.map(it => {
     if (!it || apifyItemError(it)) return null;
-    const ms = fbWhen(it);
-    const id = String(it.postId || it.facebookId || it.url || "").trim();
+    const ms = isFinite(new Date(it.time).getTime()) ? new Date(it.time).getTime()
+             : Number(it.creation_time) > 0 ? Number(it.creation_time) * 1000 : fbWhen(it);
+    const video = it.video || {};
+    const id = String(it.post_id || video.id || it.topLevelReelUrl || "").trim();
     if (!id || !isFinite(ms)) return null;
-    const media = Array.isArray(it.media) ? it.media : [];
-    const hasVideo = media.some(m => /video/i.test(String((m && (m.__typename || m.type)) || "")) || (m && m.videoUrl));
-    const reel = /\/reel\//.test(String(it.url || ""));
+    const share = (it.if_should_change_url_for_reels || {}).shareable_url;
     return {
-      externalId: id, ts: new Date(ms).toISOString(),
-      kind: reel ? "reel" : hasVideo ? "video" : media.length > 1 ? "carousel" : media.length === 1 ? "photo" : (it.link ? "link" : "text"),
-      text: String(it.text || ""),
-      permalink: it.url || it.facebookUrl || "",
-      likes: num(it.likes), comments: num(it.comments), reposts: num(it.shares), views: num(it.viewsCount),
-      thumb: (media[0] && (media[0].thumbnail || (media[0].photo_image && media[0].photo_image.uri))) || "",
+      externalId: id, ts: new Date(ms).toISOString(), kind: "reel",
+      text: String(it.text || (it.message && it.message.text) || ""),
+      permalink: it.topLevelReelUrl || share || it.shareable_url || it.topLevelUrl || "",
+      views: num(it.playCountRounded),
+      duration: video.playable_duration_in_ms ? Math.round(video.playable_duration_in_ms / 1000) : null,
+      thumb: it.thumbnail || it.thumbnailUrl || "",
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
@@ -1301,8 +1282,8 @@ async function collectFacebook(ch) {
   const pageUrl = fbTarget(ch);
   if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
   if (!process.env.APIFY_TOKEN) throw new Error("Facebook needs APIFY_TOKEN to be read server-side.");
-  return apifyRead("facebook", "fb:" + pageUrl.toLowerCase(), {
-    startUrls: [{ url: pageUrl }], resultsLimit: APIFY_MAX_POSTS, captionText: false,
+  return apifyRead("facebook", "fbr:" + pageUrl.toLowerCase(), {
+    startUrls: [{ url: pageUrl }], resultsLimit: APIFY_MAX_POSTS,
   }, fbParseApify, pageUrl.replace(/^https?:\/\/(www\.)?/, ""));
 }
 

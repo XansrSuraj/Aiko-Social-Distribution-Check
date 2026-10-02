@@ -1961,6 +1961,7 @@ async function collectServer(o){
 
   let added = 0, ok = 0, browser = 0, unreached = 0, collectedAt = null;
   let spent = 0, runs = 0, cachedN = 0, unsettled = 0;
+  const runIds = [];
   for(const j of parts){
     if((!j.results || !j.results.length) && j.error){ unreached += (j._batch || []).length; continue; }
     collectedAt = j.collectedAt || collectedAt;
@@ -1969,6 +1970,7 @@ async function collectServer(o){
       const cost = res.cost || null;
       if(cost && cost.cached) cachedN++;
       else if(cost && cost.settled === false) unsettled++;
+      if(cost && !cost.cached && cost.runId) runIds.push(cost.runId);
       checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
         browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
         dead:!!res.dead, at:Date.now(),
@@ -1986,14 +1988,16 @@ async function collectServer(o){
      the remaining credit by; a press that hit the cache would understate it. */
   const usd = Math.round(spent * 1e6) / 1e6;
   if(runs || cachedN){
-    /* Apify settles a run's charges a few seconds after it stops; the server waits for that, but a
-       figure it could not confirm in time may still read low, so it is never taken as the price */
-    checks.apifyLast = { usd, runs, cached:cachedN, settled:!unsettled, at:new Date().toISOString() };
-    if(runs && !cachedN && !unreached && !unsettled) checks.apifyPerCheck = usd;
+    /* Apify fills in a run's bill some time after the run stops, so a figure the server could not
+       confirm is provisional (it has read low by more than half). It is never taken as the price of
+       a check; refreshApifyUsage asks for the same runs again until their bills have settled. */
+    const full = !!(runs && !cachedN && !unreached);
+    checks.apifyLast = { usd, runs, cached:cachedN, settled:!unsettled, full, ids:runIds, at:new Date().toISOString() };
+    if(full && !unsettled) checks.apifyCheckUsd = usd;
   }
   saveChecks();
   toast(`${ok} channel(s) read, ${added} new post(s)`
-        + (runs ? ` · Apify $${usd.toFixed(4)} for ${runs} run(s)${unsettled ? " (still settling)" : ""}`
+        + (runs ? ` · Apify $${usd.toFixed(4)} for ${runs} run(s)${unsettled ? " so far — Apify is still settling the bill" : ""}`
                 : cachedN ? " · Apify: cached, $0" : "")
         + (browser ? ` · ${browser} need the extension` : "")
         + (unreached ? ` · ${unreached} could not be reached (will use the extension / last read)` : ""),
@@ -2022,14 +2026,38 @@ const EXT_WANT = "1.13.0";
 const EXT_PLATFORMS = ["facebook", "instagram", "x", "tiktok"];
 
 /* This month's Apify credit, from /api/apify-usage (read-only; it never starts a run). Fetched when
-   the report opens and again after a press that spent something, then the open report repaints. */
+   the report opens and again after a press that spent something, then the open report repaints.
+
+   It also settles the last press's bill. Apify fills a run's bill in some time after the run stops
+   — a press measured at $0.098 first read $0.045 — so while the last press is still provisional its
+   run ids are sent along, and once every run's bill has settled the press's cost is replaced with
+   the exact sum. Retried with a growing gap (20 s, 40 s, … ~5 min in all) until it has. */
 let apifyInfo = null;
-async function refreshApifyUsage(){
+let apifySettleTimer = null;
+async function refreshApifyUsage(attempt){
   if(!location.protocol.startsWith("http")) return;
+  const n = attempt || 0;
+  const last = checks.apifyLast;
+  const pending = last && last.settled === false && Array.isArray(last.ids) && last.ids.length ? last : null;
   try{
-    const r = await fetch("api/apify-usage");
+    const r = await fetch("api/apify-usage" + (pending ? "?runs=" + encodeURIComponent(pending.ids.join(",")) : ""));
     apifyInfo = await r.json();
   }catch(e){ apifyInfo = { ok:false, error:String(e.message || e) }; }
+
+  if(pending){
+    const st = (apifyInfo && apifyInfo.settle) || [];
+    const done = st.length === pending.ids.length && st.every(s => !s.error && s.settled);
+    /* matched by press time, not object identity — a cloud pull may have replaced checks since */
+    if(done && checks.apifyLast && checks.apifyLast.at === pending.at){
+      const usd = Math.round(st.reduce((t, s) => t + (s.usd || 0), 0) * 1e6) / 1e6;
+      checks.apifyLast = { ...pending, usd, settled:true };
+      if(pending.full) checks.apifyCheckUsd = usd;
+      saveChecks();
+    }else if(!done && n < 5){
+      clearTimeout(apifySettleTimer);
+      apifySettleTimer = setTimeout(() => refreshApifyUsage(n + 1), 20000 * (n + 1));
+    }
+  }
   if(dcRedraw){ try{ dcRedraw(); }catch(e){} }
 }
 let extVersion = null;
@@ -2479,12 +2507,13 @@ function dailyCheckModal(o){
     const apifyNote = (() => {
       const bits = [];
       const last = checks.apifyLast;
-      if(last) bits.push(last.runs ? `last press ${money(last.usd)}${last.settled === false ? " (still settling)" : ""}`
+      if(last) bits.push(last.runs ? (last.settled === false ? `last press ≥ ${money(last.usd)} (Apify still settling the bill)`
+                                                             : `last press ${money(last.usd)}`)
                                    : "last press cached · $0");
       const ai = apifyInfo;
       if(ai && ai.ok && ai.configured && ai.remainingUsd != null){
         bits.push(`${money(ai.remainingUsd)} of ${money(ai.limitUsd)} left`);
-        const per = checks.apifyPerCheck;
+        const per = checks.apifyCheckUsd;
         if(per > 0) bits.push(`≈ ${Math.floor(ai.remainingUsd / per)} more checks`);
       }else if(ai && ai.ok && !ai.configured) bits.push("APIFY_TOKEN not set on the server");
       return bits.join(" · ");
@@ -3123,7 +3152,7 @@ function dailyCheckModal(o){
       checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:checks.ytIds,
                  confirms:checks.confirms || {}, tz:checks.tz, win:checks.win,
                  window:checks.window, date:checks.date, maxPer:checks.maxPer, lastRun:null,
-                 apifyLast:checks.apifyLast, apifyPerCheck:checks.apifyPerCheck };
+                 apifyLast:checks.apifyLast, apifyCheckUsd:checks.apifyCheckUsd };
       try{ localStorage.removeItem(BRUN); }catch(e){}
       saveChecks(); draw(); toast("Report deleted — collect again for a fresh one", "trash-2");
     };
