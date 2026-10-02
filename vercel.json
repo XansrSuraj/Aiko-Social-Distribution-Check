@@ -1,6 +1,11 @@
 {
   "functions": {
-    "api/collect.js": { "maxDuration": 120 }
+    "api/collect.js": {
+      "maxDuration": 120
+    },
+    "api/apify-usage.js": {
+      "maxDuration": 30
+    }
   },
   "git": {
     "deploymentEnabled": {

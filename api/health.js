@@ -81,8 +81,8 @@ module.exports = async (req, res) => {
        before the next daily check rather than during it. */
     readers: {
       youtube: process.env.YOUTUBE_API_KEY ? "key set" : "NO KEY — unreadable from this host",
-      x: process.env.TWITTERAPI_KEY ? "key set" : "no key",
-      apify: process.env.APIFY_TOKEN ? "token set" : "no token",
+      x: process.env.APIFY_TOKEN ? "via Apify" : process.env.TWITTERAPI_KEY ? "twitterapi.io key set" : "free page read only",
+      apify: process.env.APIFY_TOKEN ? "token set — Facebook, Instagram, TikTok, X" : "no token",
       telegramBot: process.env.TG_API_ID && process.env.TG_API_HASH && process.env.TG_SESSION
         ? "session set" : "no session",
     },

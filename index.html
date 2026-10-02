@@ -1932,13 +1932,13 @@ async function collectServer(o){
   toast(`Collecting ${chans.length} channel(s)…`, "loader");
 
   /* One request per SLOW channel, one shared request for the fast ones — never a single big batch.
-     Facebook and Instagram are read through Apify, whose scraper actors cold-start and can take
-     tens of seconds; bundled with the rest, four of them in one request would push the whole call
-     past the server's time limit and take the fast channels (YouTube, Telegram, X, Viber) down with
-     it — which is exactly why a healthy day once showed every server channel as "no data". Split
-     apart, each slow channel has its own time budget and a fast channel is never held hostage to it.
+     Facebook, Instagram, TikTok and X are each an Apify run, which cold-starts and can take tens of
+     seconds; bundled with the rest, several in one request would push the whole call past the
+     server's time limit and take the fast channels (YouTube, Telegram, Viber) down with it — which
+     is exactly why a healthy day once showed every server channel as "no data". Split apart, each
+     slow channel has its own time budget and a fast channel is never held hostage to it.
      Always pull a little wider than the window on screen (192 h) so a post on the boundary survives. */
-  const SLOW = new Set(["facebook", "instagram", "tiktok", "tgbot"]);
+  const SLOW = new Set(["facebook", "instagram", "tiktok", "x", "tgbot"]);
   const groups = [];
   const fast = chans.filter(c => !SLOW.has(c.platform));
   if(fast.length) groups.push(fast);
@@ -1957,24 +1957,41 @@ async function collectServer(o){
   const parts = await Promise.all(groups.map(one));
 
   let added = 0, ok = 0, browser = 0, unreached = 0, collectedAt = null;
+  let spent = 0, runs = 0, cachedN = 0;
   for(const j of parts){
     if((!j.results || !j.results.length) && j.error){ unreached += (j._batch || []).length; continue; }
     collectedAt = j.collectedAt || collectedAt;
+    if(typeof j.apifyCostUsd === "number"){ spent += j.apifyCostUsd; runs += j.apifyRuns || 0; }
     for(const res of j.results){
+      const cost = res.cost || null;
+      if(cost && cost.cached) cachedN++;
       checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
         browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
-        dead:!!res.dead, at:Date.now() };
+        dead:!!res.dead, at:Date.now(),
+        cost:cost && !cost.cached ? cost.usd : null, cached:!!(cost && cost.cached), partial:!!res.partialRead };
       if(res.resolved && res.resolved.ytChannelId) checks.ytIds[res.channelId] = res.resolved.ytChannelId;
       if(res.ok){ ok++; added += mergePosts(res.channelId, res.posts); }
       else if(res.browserRequired) browser++;
     }
   }
   checks.lastRun = collectedAt || new Date().toISOString();
+
+  /* What this press spent on Apify — the sum of each run's own billed figure, never an estimate.
+     A press where every Apify channel ran fresh (nothing served from the 15-minute cache, no request
+     lost) is what one daily check really costs, and is kept apart as the figure the panel divides
+     the remaining credit by; a press that hit the cache would understate it. */
+  const usd = Math.round(spent * 1e6) / 1e6;
+  if(runs || cachedN){
+    checks.apifyLast = { usd, runs, cached:cachedN, at:new Date().toISOString() };
+    if(runs && !cachedN && !unreached) checks.apifyPerCheck = usd;
+  }
   saveChecks();
   toast(`${ok} channel(s) read, ${added} new post(s)`
+        + (runs ? ` · Apify $${usd.toFixed(4)} for ${runs} run(s)` : cachedN ? " · Apify: cached, $0" : "")
         + (browser ? ` · ${browser} need the extension` : "")
         + (unreached ? ` · ${unreached} could not be reached (will use the extension / last read)` : ""),
         ok ? "check-check" : "triangle-alert");
+  if(runs && typeof refreshApifyUsage === "function") refreshApifyUsage();
   return ok > 0;
 }
 
@@ -1991,11 +2008,23 @@ let extReady = false;                       // set when the bridge announces its
    shipped here does nothing until that copy is reloaded — and "is the new code actually loaded?"
    was otherwise unanswerable from the report. EXT_WANT is the version this build expects. */
 const EXT_WANT = "1.13.0";
-/* The channels the extension is the reader for — server-side these are all either blocked by the
-   platform (Instagram, X) or dependent on paid Apify credit (Facebook, TikTok). ONE list, used both
-   to decide what to ask the extension for and to describe the split in the panel; keeping two
-   copies is what let the panel claim X was a server channel and forget TikTok entirely. */
+/* The channels read through Apify server-side — and by the extension only when that read fails
+   (credit used up, token not set). ONE list, used both to decide what to ask the extension for and
+   to describe the split in the panel; keeping two copies is what once let the panel claim X was a
+   server channel and forget TikTok entirely. */
 const EXT_PLATFORMS = ["facebook", "instagram", "x", "tiktok"];
+
+/* This month's Apify credit, from /api/apify-usage (read-only; it never starts a run). Fetched when
+   the report opens and again after a press that spent something, then the open report repaints. */
+let apifyInfo = null;
+async function refreshApifyUsage(){
+  if(!location.protocol.startsWith("http")) return;
+  try{
+    const r = await fetch("api/apify-usage");
+    apifyInfo = await r.json();
+  }catch(e){ apifyInfo = { ok:false, error:String(e.message || e) }; }
+  if(dcRedraw){ try{ dcRedraw(); }catch(e){} }
+}
 let extVersion = null;
 const extStale = () => !!(extVersion && extVersion !== EXT_WANT);
 const extWaiters = new Map();               // request id -> resolve
@@ -2130,10 +2159,11 @@ function absorbRun(run){
   return added + counted;
 }
 
-/* One press for both halves — the server for YouTube and Telegram, the extension for Facebook,
-   Instagram, X and TikTok. Only the open organization's channels are sent, so a directory with
-   several orgs never has the wrong pages opened. Falls back gracefully: if the extension is not
-   installed the server half still runs and the report says which channels are still waiting. */
+/* One press for everything — the server reads every channel (YouTube and Telegram free; Facebook,
+   Instagram, X and TikTok through Apify), and the extension is asked only for whichever of those
+   the server could not read. Only the open organization's channels are sent, so a directory with
+   several orgs never has the wrong pages opened. If the extension is not installed the report
+   simply says which channels are still waiting. */
 async function runEverything(o){
   await collectServer(o);
 
@@ -2141,7 +2171,7 @@ async function runEverything(o){
   absorbBrowserRun();
 
   /* The extension is the FALLBACK for Facebook, Instagram, X and TikTok — asked for a channel only
-     when the server could not read it (Apify credits out, an IP block, a key not set). A server
+     when the server's Apify read failed (credit used up, token not set, a profile it cannot see). A server
      success (meta.ok) is left alone. The extension gives Facebook captions without a reliable
      per-post time, so the content match below is deliberately strict and WORD-LEVEL: a drop is only
      credited to a channel when most of the drop's words appear in that channel's caption — a stale,
@@ -2394,10 +2424,11 @@ function dailyCheckModal(o){
     const chanOf = id => chans.find(c => c.id === id) || {};
 
     /* ── which sources have reported, and is anything waiting ──
-       Server: everything api/collect can read without a login. Browser: everything that only
-       answers to a session, via the extension. Platform names for the two rows below are derived
-       from whichever channels are actually present, rather than spelled out — so the next
-       platform added to either side never has to be found and edited in here by hand. */
+       Server · free: what api/collect reads at no cost (YouTube, Telegram, Viber's push, the bot).
+       Server · Apify: what it reads through paid Apify runs, with the extension as the fallback.
+       Platform names for the two rows below are derived from whichever channels are actually
+       present, rather than spelled out — so the next platform added to either side never has to
+       be found and edited in here by hand. */
     /* Split by which source can actually READ each channel, from the one list runEverything asks
        the extension for — these were two hardcoded platform lists that drifted apart from it. X had
        moved to the extension when twitterapi.io stopped answering but was still filed under
@@ -2435,6 +2466,22 @@ function dailyCheckModal(o){
         ${total ? (extra || "") : ""}
       </div>`;
 
+    /* Apify spend: what the last press cost (each run's own billed figure), what is left of this
+       month's credit, and how many more full checks that buys at the last full check's price. */
+    const money = n => "$" + (n < 0.1 ? n.toFixed(4) : n.toFixed(2));
+    const apifyNote = (() => {
+      const bits = [];
+      const last = checks.apifyLast;
+      if(last) bits.push(last.runs ? `last press ${money(last.usd)}` : "last press cached · $0");
+      const ai = apifyInfo;
+      if(ai && ai.ok && ai.configured && ai.remainingUsd != null){
+        bits.push(`${money(ai.remainingUsd)} of ${money(ai.limitUsd)} left`);
+        const per = checks.apifyPerCheck;
+        if(per > 0) bits.push(`≈ ${Math.floor(ai.remainingUsd / per)} more checks`);
+      }else if(ai && ai.ok && !ai.configured) bits.push("APIFY_TOKEN not set on the server");
+      return bits.join(" · ");
+    })();
+
     const sources = `
       <div class="dc-srcs">
         <div class="dc-run">
@@ -2444,12 +2491,13 @@ function dailyCheckModal(o){
                 /* the fix is in this deployment but not in the copy running in the browser, which
                    is the one that actually does the reading — say so plainly, with both numbers */
                 ? `extension is v${esc(extVersion)} but this build needs v${esc(EXT_WANT)} — reload it at chrome://extensions`
-                : "server + extension, one press")
-            : brwIds.length ? `extension not detected — only ${esc(platNames(srvIds) || "the server")} will run`
-                            : "server only — this org has no Facebook or Instagram channels"}</span>
+                : "everything server-side · extension standing by as fallback")
+            : apifyInfo && apifyInfo.configured === false && brwIds.length
+              ? `Apify not configured and no extension — only ${esc(platNames(srvIds) || "the free channels")} can be read`
+              : "everything server-side, one press"}</span>
           <span class="sp"></span>
           ${pendingN ? `<button class="b s" id="dcMerge"><i data-lucide="download"></i> Merge ${pendingN} waiting</button>` : ""}
-          <button class="b s" id="dcRun" title="${esc(platNames(srvIds) || "Server")} only">Server only</button>
+          <button class="b s" id="dcRun" title="Read every channel server-side, without asking the extension for the ones that fail">Server only</button>
         </div>
         ${(() => {
           /* "2/4 channels" says two did not answer and nothing at all about WHY, which is the only
@@ -2465,12 +2513,9 @@ function dailyCheckModal(o){
             `<div><b>${esc((chans.find(c => c.id === x.id) || {}).name || x.id)}</b> — ${esc(x.note)}</div>`
           ).join("")}</div>`;
         })()}
-        ${srcRow("Server", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
-        ${srcRow("Browser", platNames(brwIds), gotFrom(brwIds), brwIds.length,
-          `<span class="dc-sn" style="opacity:.75">${extReady
-             ? (extStale() ? `extension v${esc(extVersion)} — OUTDATED, needs v${esc(EXT_WANT)}`
-                           : `extension ready${extVersion ? " · v" + esc(extVersion) : ""}`)
-             : "extension not detected"}</span>`)}
+        ${srcRow("Server · free", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
+        ${srcRow("Server · Apify", platNames(brwIds), gotFrom(brwIds), brwIds.length,
+          apifyNote ? `<span class="dc-sn" style="opacity:.75">${esc(apifyNote)}</span>` : "")}
       </div>`;
 
     /* ── headline ── */
@@ -2486,8 +2531,8 @@ function dailyCheckModal(o){
            the two halves were put behind one press, and pointing at a control by the wrong name in
            the empty state is the worst possible moment to do it */
         ? `<div class="dc-head warn"><i data-lucide="circle-help"></i><div><b>Nothing measured yet</b>
-             <div class="dc-sub">Press <b>Run everything</b> — it reads ${esc(platNames(srvIds) || "the server channels")}${
-               brwIds.length ? " and asks the extension for " + esc(platNames(brwIds)) : ""} in one go.</div></div></div>`
+             <div class="dc-sub">Press <b>Run everything</b> — the server reads ${esc(platNames(srvIds) || "the free channels")}${
+               brwIds.length ? " free and " + esc(platNames(brwIds)) + " through Apify" : ""}, all in one go.</div></div></div>`
         : `<div class="dc-head good"><i data-lucide="check-check"></i><div>
              <b>All clear — every collected channel got all ${rep.expected} post${rep.expected === 1 ? "" : "s"}</b>
              ${rep.sum.unknown ? `<div class="dc-sub">${rep.sum.unknown} channel(s) still have no data.</div>` : ""}</div></div>`;
@@ -3069,7 +3114,8 @@ function dailyCheckModal(o){
          data, and re-collecting is no reason to make somebody tick them all again */
       checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:checks.ytIds,
                  confirms:checks.confirms || {}, tz:checks.tz, win:checks.win,
-                 window:checks.window, date:checks.date, maxPer:checks.maxPer, lastRun:null };
+                 window:checks.window, date:checks.date, maxPer:checks.maxPer, lastRun:null,
+                 apifyLast:checks.apifyLast, apifyPerCheck:checks.apifyPerCheck };
       try{ localStorage.removeItem(BRUN); }catch(e){}
       saveChecks(); draw(); toast("Report deleted — collect again for a fresh one", "trash-2");
     };
@@ -3078,6 +3124,7 @@ function dailyCheckModal(o){
   /* published so a channel handed over mid-run repaints straight away. closeModal() drops it, so a
      stale closure is never called against a modal that is no longer on screen. */
   dcRedraw = draw;
+  refreshApifyUsage();
 }
 
 /* ═══════════════════ render ═══════════════════ */

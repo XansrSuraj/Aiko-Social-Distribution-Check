@@ -2,18 +2,15 @@
  * POST /api/collect  { channels:[{id,platform,url,handle,ytChannelId?}], days? }
  *   -> { ok, collectedAt, results:[ { channelId, platform, source, ok, posts:[…], note, resolved } ] }
  *
- * Reads the recent post list of every channel it can reach WITHOUT any credential:
+ * Reads the recent post list of every channel, server-side:
  *
- *   youtube   — the public RSS feed (no API key, no quota, officially published by YouTube)
- *   telegram  — t.me/s/<channel>, the server-rendered preview Telegram ships for public channels
- *   instagram — the same public profile endpoint instagram.com itself calls. Undocumented and
- *               rate-limited per IP, so it is strictly best-effort: some profiles answer, some
- *               return 400/404 for reasons outside our control. Never fail the whole run over it.
- *   x         — the profile page's own server-rendered HTML, which carries schema.org microdata:
- *               one <article itemType="SocialMediaPosting"> per post with an exact ISO timestamp,
- *               the full text, the media and every counter. No token and no login.
- *   facebook  — no public path exists any more (mbasic is gone, /posts is behind a login wall),
- *               so it is reported as browser-required and collected by the extension instead.
+ *   youtube   — the official Data API when YOUTUBE_API_KEY is set, else the channel page (free)
+ *   telegram  — t.me/s/<channel>, the server-rendered preview Telegram ships for public channels (free)
+ *   facebook  — Apify (apify/facebook-posts-scraper)        } paid per post returned, needs
+ *   instagram — Apify (apify/instagram-post-scraper)        } APIFY_TOKEN; each result carries
+ *   tiktok    — Apify (clockworks/tiktok-scraper)           } its own exact cost — see the Apify
+ *   x         — Apify (xquik/x-tweet-scraper), then twitterapi.io, then the free page read
+ *   tgbot     — a Telegram user-session reading the bot's DMs (TG_SESSION)
  *   viber     — nothing to read: no public post list, no web client, and an encrypted local
  *               store. So it is pushed in instead — whatever publishes to Viber posts to
  *               /api/ingest and this reads that back. See ingest-store.js.
@@ -27,7 +24,6 @@
  */
 
 const ingest = require("../ingest-store.js");
-const browserReader = require("../browser-reader.js");
 
 const TIMEOUT = 12000;
 const MAX_CHANNELS = 40;
@@ -89,51 +85,174 @@ async function get(url, extraHeaders, alsoRetry) {
 }
 
 /* ═══════════════════ Apify ═══════════════════ */
-/* Apify runs a scraper ("actor") on its own residential infrastructure and hands the result back
-   as a dataset. The run-sync-get-dataset-items route starts the run, waits for it, and returns the
-   items in a single call — which is why this has its own POST with a long leash rather than the
-   get() helper above (that one is GET-only and short-timeout). Scraping is slower than a plain
-   fetch, so the Vercel function is given matching room in vercel.json (maxDuration). Only ever
-   called when APIFY_TOKEN is set; the callers keep their own free path for when it is not. */
-const APIFY_TIMEOUT = 55000;
-async function apifyItems(actorPath, input) {
-  const url = "https://api.apify.com/v2/acts/" + actorPath +
-              "/run-sync-get-dataset-items?token=" + encodeURIComponent(process.env.APIFY_TOKEN) +
-              "&timeout=" + Math.floor(APIFY_TIMEOUT / 1000);
+/* Facebook, Instagram, TikTok and X are all read through Apify, which runs a scraper ("actor") on
+   its own infrastructure and hands back a dataset. Every one of those platforms refuses a plain fetch
+   from a datacenter IP, and a headless browser running on Vercel itself was tried (2026-10-01) and
+   was refused too — every attempt quietly fell back to Apify.
+
+   All four actors bill PER EVENT (per post returned, plus a $0.001 start fee for some), never per
+   minute, so the run options below exist to bound SPEND and to stay under the free plan's 8 GB
+   concurrent-memory cap, not to save compute:
+     · memory is pinned per actor. Their defaults add up to 14.6 GB for one daily check, and the
+       dashboard fires every slow channel in parallel — the free plan refuses whichever run would
+       cross 8 GB, which reads as a channel that "could not be read" for no visible reason.
+     · maxTotalChargeUsd caps what any single run may cost, so a misbehaving actor cannot drain the
+       month's credit in one click.
+     · a run that overruns the time budget is aborted (billing stops) and whatever it had already
+       pushed is still used — those items were paid for.
+   Runs are started asynchronously rather than through run-sync so the run id is known, which is
+   what lets every result report its own exact cost, read back from Apify's own run record.
+
+   How many posts each run asks for is the single knob that sets the cost of a daily check:
+   APIFY_MAX_POSTS (default 6) — about two days at SportsFC's ~3 posts per channel per day, which
+   covers the "today" and "yesterday" windows. No actor's date filter is used: on Facebook and
+   TikTok it is a paid add-on, and on all of them an EMPTY filtered result cannot tell "posted
+   nothing" from "the scraper got nothing" — the newest N posts let the report see that for itself. */
+const APIFY_API = "https://api.apify.com/v2";
+const APIFY_BUDGET_MS = 95000;          // run + dataset read; vercel.json gives api/collect 120 s
+const APIFY_MAX_POSTS = Math.max(1, Math.min(50, Math.floor(Number(process.env.APIFY_MAX_POSTS)) || 6));
+
+/* Free-plan ("FREE" tier) event prices, read from each actor's own pricing on 2026-10-02 — used only
+   to set a per-run spending cap at twice the expected charge. The cost actually REPORTED for a run
+   is Apify's own figure from the run record, never this estimate. */
+const APIFY_ACTORS = {
+  instagram: { id: "apify~instagram-post-scraper", memory: 512,  start: 0,     perPost: 0.0017 },
+  facebook:  { id: "apify~facebook-posts-scraper", memory: 2048, start: 0.001, perPost: 0.005 },
+  tiktok:    { id: "clockworks~tiktok-scraper",    memory: 2048, start: 0.001, perPost: 0.0037 },
+  x:         { id: "xquik~x-tweet-scraper",         memory: 256,  start: 0,     perPost: 0.00015 },
+};
+const apifyExpectedUsd = platform => {
+  const a = APIFY_ACTORS[platform];
+  return a.start + a.perPost * APIFY_MAX_POSTS;
+};
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TERMINAL = /^(SUCCEEDED|FAILED|ABORTED|TIMED-OUT)$/;
+
+async function apifyCall(method, path, params, body, ms) {
+  const u = new URL(APIFY_API + path);
+  u.searchParams.set("token", process.env.APIFY_TOKEN || "");
+  for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), APIFY_TIMEOUT);
-  let r;
+  const timer = setTimeout(() => ctl.abort(), ms || 20000);
   try {
-    r = await fetch(url, {
-      method: "POST", signal: ctl.signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
+    const r = await fetch(u.toString(), {
+      method, signal: ctl.signal,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
     });
+    const text = await r.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch (e) { /* reported below from the raw text */ }
+    return { status: r.status, json, text };
   } catch (e) {
     const aborted = e && (e.name === "AbortError" || /abort/i.test(String(e)));
-    throw new Error(aborted
-      ? "Apify took too long to answer — treat this channel as unknown, not empty"
-      : "Could not reach Apify: " + (e.message || e));
+    throw new Error(aborted ? "Apify did not answer in time — treat this channel as unknown, not empty"
+                            : "Could not reach Apify: " + (e.message || e));
   } finally { clearTimeout(timer); }
-
-  const body = await r.text();
-  /* Apify signals an exhausted monthly free quota with a 403 whose body says "usage hard limit" —
-     tell that apart from a genuinely bad token, since the fix is completely different (wait for the
-     cycle to reset / add credit vs. re-check the key). */
-  if (/usage hard limit|monthly usage|usage limit/i.test(body))
-    throw new Error("Apify monthly free credits are used up — Facebook/Instagram/TikTok can't be read until the cycle resets (or you add Apify credit)");
-  if (r.status === 401 || r.status === 403) throw new Error("Apify refused the token (HTTP " + r.status + ") — check APIFY_TOKEN");
-  if (r.status !== 200 && r.status !== 201) throw new Error("Apify returned HTTP " + r.status);
-  let items; try { items = JSON.parse(body); } catch (e) { throw new Error("Apify answered with something that was not JSON"); }
-  if (!Array.isArray(items)) items = (items && items.items) || [];
-  return items;
 }
 
-/* YYYY-MM-DD, `days` ago — bounds an Apify scrape to just the recent window, which keeps every run
-   fast and cheap (fewer results billed) rather than crawling a page's whole history. */
-function sinceDate(days) {
-  return new Date(Date.now() - days * 86400e3).toISOString().slice(0, 10);
+const apifyMessage = res => String((((res.json || {}).error) || {}).message || res.text || ("HTTP " + res.status));
+
+/* An exhausted monthly credit, a refused token and a plain failure have completely different fixes
+   (wait for the cycle / add credit, re-check the key, look at the run) — so they are named apart. */
+function apifyError(res) {
+  const msg = apifyMessage(res);
+  if (/usage hard limit|monthly usage|usage limit|not enough credit|insufficient/i.test(msg))
+    return new Error("Apify's monthly credit is used up — these channels can't be read until the cycle " +
+                     "resets or credit is added (" + msg.slice(0, 160) + ")");
+  if (res.status === 401 || res.status === 403)
+    return new Error("Apify refused the token (HTTP " + res.status + ") — check APIFY_TOKEN");
+  return new Error("Apify answered HTTP " + res.status + ": " + msg.slice(0, 200));
 }
+
+/* The cost of one run, from Apify's own run record. usageTotalUsd is what Apify bills for the run;
+   chargedEventCounts says what it was for (e.g. { post: 6, "actor-start": 1 }). */
+function apifyCost(run) {
+  return {
+    runId: run.id, status: run.status,
+    usd: typeof run.usageTotalUsd === "number" ? run.usageTotalUsd : null,
+    events: run.chargedEventCounts || null,
+    cached: false,
+  };
+}
+
+/* Start an actor, wait for it inside the time budget, read its dataset. Returns { items, cost,
+   partial }. Throws only when nothing usable came back. */
+async function apifyRun(platform, input) {
+  const a = APIFY_ACTORS[platform];
+  const deadline = Date.now() + APIFY_BUDGET_MS;
+  const left = () => deadline - Date.now();
+  const cap = Math.max(0.01, Math.round(apifyExpectedUsd(platform) * 2 * 10000) / 10000);
+
+  /* Started with a bounded retry while the account's concurrent-memory cap is momentarily full —
+     another channel's run from the same daily check may still be finishing. Anything else is final. */
+  let start;
+  for (let attempt = 0; ; attempt++) {
+    start = await apifyCall("POST", `/acts/${a.id}/runs`, {
+      memory: a.memory,
+      timeout: Math.floor(APIFY_BUDGET_MS / 1000) - 10,
+      maxTotalChargeUsd: cap,
+      waitForFinish: Math.max(1, Math.min(60, Math.floor(left() / 1000) - 10)),
+    }, input, Math.min(left(), 75000));
+    if (start.status === 200 || start.status === 201) break;
+    if (/memory limit|concurrent/i.test(apifyMessage(start)) && attempt < 4 && left() > 40000) {
+      await sleep(5000 + attempt * 3000);
+      continue;
+    }
+    throw apifyError(start);
+  }
+
+  let run = start.json && start.json.data;
+  if (!run || !run.id) throw new Error("Apify started a run but returned no run record");
+  while (!TERMINAL.test(run.status) && left() > 10000) {
+    const r = await apifyCall("GET", `/actor-runs/${run.id}`,
+      { waitForFinish: Math.max(1, Math.min(60, Math.floor(left() / 1000) - 8)) }, null, Math.min(left(), 70000));
+    if (r.status !== 200 || !r.json || !r.json.data) throw apifyError(r);
+    run = r.json.data;
+  }
+
+  let partial = false;
+  if (!TERMINAL.test(run.status)) {
+    partial = true;
+    try {
+      const ab = await apifyCall("POST", `/actor-runs/${run.id}/abort`, null, null, 8000);
+      if (ab.json && ab.json.data) run = ab.json.data;
+    } catch (e) { /* the actor's own timeout stops it shortly anyway */ }
+  }
+
+  const ds = await apifyCall("GET", `/datasets/${run.defaultDatasetId}/items`,
+    { clean: 1, format: "json" }, null, Math.max(8000, Math.min(left(), 20000)));
+  const items = ds.status === 200 && Array.isArray(ds.json) ? ds.json : [];
+
+  /* the run record is final only once the run has stopped; read it once more for the exact cost */
+  try {
+    const fin = await apifyCall("GET", `/actor-runs/${run.id}`, null, null, 8000);
+    if (fin.status === 200 && fin.json && fin.json.data) run = fin.json.data;
+  } catch (e) { /* keep the last record we had */ }
+
+  if (!items.length && run.status !== "SUCCEEDED") {
+    throw new Error(`Apify run ${run.status.toLowerCase()}` +
+      (run.statusMessage ? `: ${String(run.statusMessage).slice(0, 160)}` : "") +
+      " — treat this channel as unknown, not empty");
+  }
+  return { items, cost: apifyCost(run), partial };
+}
+
+/* An actor reports a profile it could not read (private, age-restricted, removed) as an item with
+   an error field rather than as a failed run — that reason is the useful part, so it is kept. */
+const apifyItemError = it => it && (it.errorDescription || it.error || it.errorMessage) || "";
+
+/* Cache of a paid read. Repeated "Run daily check" clicks inside the window cost nothing. */
+const APIFY_CACHE_MS = 15 * 60e3;
+async function apifyCached(cacheName) {
+  try { const c = await ingest.cacheGet(cacheName, APIFY_CACHE_MS); return c && c.length ? c : null; }
+  catch (e) { return null; }
+}
+async function apifyRemember(cacheName, posts) {
+  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
+}
+const CACHED_COST = { usd: 0, cached: true };
 
 /* Last resort for a BRIEF live-read blip (an actor cold-starts, a momentary 5xx): the last good
    read, but only if it is genuinely recent. Kept deliberately short (20 min) — a stale read served
@@ -792,40 +911,105 @@ function xParseApi(jsonText, handle) {
   }).filter(Boolean);
 }
 
+/* xquik/x-tweet-scraper's default ("legacy") item: id, text, createdAt (X's own "Wed Oct 01 13:00:00
+   +0000 2026" form, which Date parses), url, author.username, isRetweet / isReply, the four counters
+   and a media array. Retweets and replies are already excluded in the actor's input — before they
+   are billed — and dropped again here in case an item slips through; so is anything by another
+   author, for the same reason the page parser drops reposts. */
+function xParseApify(items, handle) {
+  const me = handle.toLowerCase();
+  return items.map(t => {
+    if (!t || apifyItemError(t)) return null;
+    const id = String(t.id || t.id_str || "").trim();
+    const ms = new Date(t.createdAt || t.created_at || 0).getTime();
+    if (!id || !isFinite(ms)) return null;
+    if (t.isRetweet || t.isReply || t.retweeted_status) return null;
+    const a = t.author || {};
+    const who = String(a.username || a.userName || a.screen_name || t.authorUsername || "").toLowerCase();
+    if (who && who !== me) return null;
+    const media = Array.isArray(t.media) ? t.media : [];
+    const mtype = String((media[0] && (media[0].type || media[0].mediaType)) || "").toLowerCase();
+    return {
+      externalId: id, ts: new Date(ms).toISOString(),
+      kind: /video|gif/.test(mtype) ? "video" : mtype ? "photo" : "text",
+      text: String(t.text || t.full_text || ""),
+      views: num(t.viewCount), likes: num(t.likeCount), comments: num(t.replyCount), reposts: num(t.retweetCount),
+      thumb: (media[0] && (media[0].url || media[0].media_url_https || media[0].thumbnail)) || "",
+      permalink: t.url || ("https://x.com/" + handle + "/status/" + id),
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
+/* 1) Apify — the primary reader whenever APIFY_TOKEN is set (apifyRead: cache, run, stale fallback). */
+function collectXApify(handle) {
+  return apifyRead("x", "xa:" + handle.toLowerCase(), {
+    twitterHandles: [handle], mode: "profileTweets", maxItems: APIFY_MAX_POSTS,
+    tweetTypes: { excludeReplies: true, excludeRetweets: true },
+  }, items => xParseApify(items, handle), "@" + handle);
+}
+
+/* 2) twitterapi.io — kept as a second paid route for when Apify cannot answer. */
+async function collectXTwitterApi(handle) {
+  const cacheName = "x:" + handle.toLowerCase();
+  try {
+    const cached = await ingest.cacheGet(cacheName, 10 * 60e3);
+    if (cached && cached.length) return { posts: cached, source: "x-api", note: "read via twitterapi.io (cached ~10 min to save credits)" };
+  } catch (e) { /* cache miss is fine */ }
+  let r;
+  try {
+    r = await get("https://api.twitterapi.io/twitter/user/last_tweets?userName=" + encodeURIComponent(handle),
+      { "X-API-Key": process.env.TWITTERAPI_KEY });
+  } catch (err) {
+    const stale = await staleRead(cacheName);
+    if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io was unreachable — showing the last good read (" + (err.message || err) + ")" };
+    throw err;
+  }
+  if (r.status !== 200) {
+    const stale = await staleRead(cacheName);
+    if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io returned HTTP " + r.status + " — showing the last good read" };
+    throw new Error("twitterapi.io returned HTTP " + r.status + (r.status === 402 ? " (account balance is empty)" : "") + " for @" + handle);
+  }
+  const apiPosts = xParseApi(r.body, handle).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  if (!apiPosts.length) throw new Error("twitterapi.io returned no posts for @" + handle + " — treat as unknown, not empty.");
+  try { await ingest.cacheSet(cacheName, apiPosts); } catch (e) { /* caching is best-effort */ }
+  return { posts: apiPosts, source: "x-api", note: "read server-side via twitterapi.io" };
+}
+
+/* Each route is tried in turn and a failed one never blocks the next: twitterapi.io answering 402
+   (an empty balance) used to end the read right there, even though the free page read below could
+   still have been tried. Every route that refused is named in the final note or error. */
 async function collectX(ch) {
   const handle = xTarget(ch);
   if (!handle) throw new Error("No X (Twitter) handle could be read from this channel");
-
-  /* Preferred path: a dedicated X API (twitterapi.io). X blocks datacenter IPs outright, so a
-     serverless host cannot read the page itself — this API reads it reliably and returns JSON.
-     Cached ~10 minutes, so several "Run daily check" clicks in a row cost ONE paid call, not one
-     each. Only used when TWITTERAPI_KEY is set; otherwise the free direct/proxy path below runs. */
-  if (process.env.TWITTERAPI_KEY) {
-    const cacheName = "x:" + handle.toLowerCase();
-    try {
-      const cached = await ingest.cacheGet(cacheName, 10 * 60e3);
-      if (cached && cached.length) return { posts: cached, source: "x-api", note: "read via twitterapi.io (cached ~10 min to save credits)" };
-    } catch (e) { /* cache miss is fine */ }
-    let r;
-    try {
-      r = await get("https://api.twitterapi.io/twitter/user/last_tweets?userName=" + encodeURIComponent(handle),
-        { "X-API-Key": process.env.TWITTERAPI_KEY });
-    } catch (err) {
-      const stale = await staleRead(cacheName);
-      if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io was unreachable — showing the last good read (" + (err.message || err) + ")" };
-      throw err;
-    }
-    if (r.status !== 200) {
-      const stale = await staleRead(cacheName);
-      if (stale) return { posts: stale, source: "x-api", note: "twitterapi.io returned HTTP " + r.status + " — showing the last good read" };
-      throw new Error("twitterapi.io returned HTTP " + r.status + " for @" + handle);
-    }
-    const apiPosts = xParseApi(r.body, handle).sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    if (!apiPosts.length) throw new Error("twitterapi.io returned no posts for @" + handle + " — treat as unknown, not empty.");
-    try { await ingest.cacheSet(cacheName, apiPosts); } catch (e) { /* caching is best-effort */ }
-    return { posts: apiPosts, source: "x-api", note: "read server-side via twitterapi.io" };
+  const refused = [];
+  let spent = null;                       // a failed Apify run still cost something — keep it on the result
+  if (process.env.APIFY_TOKEN) {
+    try { return await collectXApify(handle); }
+    catch (e) { refused.push("Apify: " + (e.message || e)); spent = e.cost || null; }
   }
+  const withSpent = out => (spent && !out.cost ? Object.assign(out, { cost: spent }) : out);
+  if (process.env.TWITTERAPI_KEY) {
+    try {
+      const out = await collectXTwitterApi(handle);
+      if (refused.length) out.note += " · " + refused.join(" | ");
+      return withSpent(out);
+    } catch (e) { refused.push("twitterapi.io: " + (e.message || e)); }
+  }
+  try {
+    const out = await collectXDirect(handle);
+    if (refused.length) out.note += " · paid readers failed first — " + refused.join(" | ");
+    return withSpent(out);
+  } catch (e) {
+    refused.push("x.com page: " + (e.message || e));
+    const err = new Error(refused.join(" | "));
+    err.cost = spent;
+    throw err;
+  }
+}
 
+/* 3) The free page read — X's logged-out profile microdata. Works from a home IP; X answers a
+   datacenter IP with an empty shell, which is why it comes last. */
+async function collectXDirect(handle) {
   const target = "https://x.com/" + encodeURIComponent(handle);
   const parse = body => xArticles(body).map(a => xParsePost(a, handle)).filter(Boolean);
 
@@ -928,151 +1112,80 @@ async function collectTelegram(ch) {
   return { posts, note: "Public preview shows roughly the last 20 posts" };
 }
 
-/* ═══════════════════ instagram — free, server-side, via a real headless browser ═══════════════════
-   Instagram's public JSON endpoint (used further below) is refused from a datacenter IP — measured
-   directly, a 429 in ~25ms. What is NOT refused is a full page load: navigating a real (headless)
-   browser to the plain profile page renders the actual post grid, no login wall, no token, no paid
-   scraper — verified 2026-10-01 against this project's own channels. The grid's <a href="/p/…"> and
-   <a href="/reel/…"> links carry every recent post's id; each permalink page then carries its own
-   exact <time datetime> and a full caption in its og:description meta tag. Some accounts sit behind
-   Instagram's own age/content restriction wall regardless of who's asking — that is a property of
-   the account, not a block on this reader, and is reported as its own distinct failure rather than
-   folded into "Instagram refused us". */
-const IG_BROWSER_LIMIT = 8;               /* newest grid items whose permalink is actually opened */
-function igOgCaption(desc) {
-  /* Instagram's og:description reads "12 likes, 3 comments - handle on DATE: "the actual caption".",
-     trailing period included — a caption can itself contain quotes and colons, so anchoring past the
-     one guaranteed `: "` marker and then trimming from the LAST quote onward is sturdier than a
-     regex trying to describe the whole shape (a $-anchored one broke on that trailing period). */
-  const s = String(desc || "");
-  const i = s.indexOf(': "');
-  if (i === -1) return s;
-  const body = s.slice(i + 3);
-  const last = body.lastIndexOf('"');
-  return last === -1 ? body : body.slice(0, last);
-}
-async function collectInstagramBrowser(name) {
-  return browserReader.withPage(async page => {
-    await page.goto("https://www.instagram.com/" + encodeURIComponent(name) + "/", { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
-
-    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => "");
-    if (/restricted profile|must be \d+ years old/i.test(bodyText)) {
-      throw new Error("Instagram puts this profile behind its own age/content restriction wall, " +
-        "which requires a logged-in session to view — an account-level flag, not a block on this reader.");
-    }
-    if (/\/accounts\/login/.test(page.url())) {
-      throw new Error("Instagram redirected this profile to a login page — treat as unknown, not empty.");
-    }
-
-    const hrefs = await page.$$eval('a[href*="/p/"], a[href*="/reel/"]',
-      els => [...new Set(els.map(e => e.getAttribute("href")))]);
-    if (!hrefs.length) {
-      throw new Error("Instagram's profile page rendered but no post grid was found — treat as unknown, not empty.");
-    }
-
-    const posts = [];
-    for (const href of hrefs.slice(0, IG_BROWSER_LIMIT)) {
-      const shortcode = (href.match(/\/(?:p|reel)\/([^/]+)/) || [])[1];
-      if (!shortcode) continue;
-      try {
-        await page.goto("https://www.instagram.com" + href, { waitUntil: "domcontentloaded" });
-        await page.waitForTimeout(1200);
-        const iso = await page.$eval("time", el => el.getAttribute("datetime")).catch(() => null);
-        if (!iso || isNaN(new Date(iso).getTime())) continue;
-        const desc = await page.$eval('meta[property="og:description"]', el => el.getAttribute("content")).catch(() => "");
-        const thumb = await page.$eval('meta[property="og:image"]', el => el.getAttribute("content")).catch(() => "");
-        posts.push({
-          externalId: shortcode, ts: new Date(iso).toISOString(),
-          kind: href.includes("/reel/") ? "reel" : "image",
-          text: igOgCaption(desc),
-          permalink: "https://www.instagram.com" + href,
-          thumb: thumb || "",
-        });
-      } catch (e) { /* one unreadable permalink must not take the rest of the grid down with it */ }
-    }
-    if (!posts.length) {
-      throw new Error("Instagram's grid rendered but no permalink could be read — treat as unknown, not empty.");
-    }
-    return { posts, source: "instagram-browser",
-             note: "read server-side via a headless browser page load — free, no login, no Apify" };
-  });
+/* ═══════════════════ the shared Apify read ═══════════════════ */
+/* Every Apify-read platform has the same shape: a fresh cache answers for free; otherwise one run,
+   whose items the platform's own mapper turns into posts; a failed run falls back to a read from the
+   last 20 minutes (staleRead); and a run that came back with no usable posts names the actor's own
+   reason when it gave one — a private or age-restricted profile arrives as an error ITEM, not a
+   failed run, and "Instagram restricts this profile" is worth far more than "no posts".
+   A run that produced nothing still cost something; that cost rides on the error (err.cost) so the
+   per-check total stays honest. */
+async function apifyRead(platform, cacheName, input, parse, who) {
+  const source = platform + "-apify";
+  const cached = await apifyCached(cacheName);
+  if (cached) return { posts: cached, source, note: "read via Apify (cached ~15 min — no new charge)", cost: CACHED_COST };
+  let out;
+  try {
+    out = await apifyRun(platform, input);
+  } catch (err) {
+    const stale = await staleRead(cacheName);
+    if (stale) return { posts: stale, source, note: "Apify failed — showing the last good read (" + (err.message || err) + ")", cost: CACHED_COST };
+    throw err;
+  }
+  const posts = parse(out.items);
+  if (!posts.length) {
+    const why = out.items.map(apifyItemError).find(Boolean);
+    const e = new Error("Apify returned no posts for " + who + (why ? " — " + String(why).slice(0, 200) : "") +
+                        " — treat this as unknown, not empty.");
+    e.cost = out.cost;
+    throw e;
+  }
+  await apifyRemember(cacheName, posts);
+  return { posts, source, cost: out.cost, partialRead: out.partial,
+           note: "read server-side via Apify" + (out.partial ? " (run hit its time budget — partial read)" : "") };
 }
 
-/* ═══════════════════ instagram — Apify / public-endpoint fallbacks ═══════════════════ */
+/* ═══════════════════ instagram ═══════════════════ */
+
+/* apify/instagram-post-scraper at dataDetailLevel "basicData" — caption, timestamp, url, shortCode,
+   type/productType and counts, billed as one flat event per post with no "details" surcharge.
+   The shortcode is the id, the same one the extension and the public endpoint use, so a post read
+   by more than one of them merges instead of counting twice. A tagged or collab post carries
+   someone else's ownerUsername — not this channel's own — and is dropped. */
+function igParseApify(items, name) {
+  const me = name.toLowerCase();
+  return items.map(it => {
+    if (!it || apifyItemError(it)) return null;
+    const ms = new Date(it.timestamp || 0).getTime();
+    const id = String(it.shortCode || it.id || "").trim();
+    if (!id || !isFinite(ms) || ms <= 0) return null;
+    if (it.ownerUsername && String(it.ownerUsername).toLowerCase() !== me) return null;
+    const t = String(it.type || "");
+    const reel = it.productType === "clips" || /\/reels?\//.test(String(it.url || ""));
+    return {
+      externalId: id, ts: new Date(ms).toISOString(),
+      kind: reel ? "reel" : t === "Sidecar" ? "carousel" : t === "Video" ? "video" : "image",
+      text: String(it.caption || ""),
+      permalink: it.url || "https://www.instagram.com/p/" + id + "/",
+      likes: num(it.likesCount), comments: num(it.commentsCount),
+      views: num(it.videoViewCount || it.videoPlayCount), duration: num(it.videoDuration),
+      thumb: it.displayUrl || "",
+    };
+  }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
 
 async function collectInstagram(ch) {
   const name = igTarget(ch);
   if (!name) throw new Error("No Instagram username could be read from this channel");
 
-  /* Browser-first: free, and measured to be MORE reliable than the plain public endpoint below,
-     which a datacenter IP gets refused outright. Cached the same ~15 min as the paid tiers below —
-     a real page load costs seconds of Vercel function time even though it costs no money, so a
-     burst of "Run daily check" clicks should still cost one browser run, not one each.
-     DISABLE_BROWSER_READER exists purely for the test suite: Playwright makes its own network calls
-     through a real Chromium process, which a stubbed global.fetch (see test/apify.test.js) cannot
-     see or intercept — without this escape hatch, a test built to exercise the Apify fallback in
-     isolation would instead launch a real browser against the real internet. */
-  if (!process.env.DISABLE_BROWSER_READER) {
-    const cacheName = "ig-browser:" + name.toLowerCase();
-    try {
-      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-      if (c && c.length) return { posts: c, source: "instagram-browser", note: "read via headless browser (cached ~15 min)" };
-    } catch (e) { /* cache miss is fine */ }
-    try {
-      const out = await collectInstagramBrowser(name);
-      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
-      return out;
-    } catch (browserErr) {
-      /* fall through to Apify (if configured) or the public endpoint — the browser note travels
-         with whichever of those answers, so a persistent browser-side failure is never silent */
-      var browserNote = String((browserErr && browserErr.message) || browserErr);
-    }
-  }
-
-  /* Preferred when APIFY_TOKEN is set: Apify's Instagram scraper, which reads from a residential
-     IP and does not depend on the fragile public web endpoint below (Instagram degrades or blocks
-     that one without warning). Cached ~15 min — repeated daily-check runs cost one paid call, not
-     one each. Pinned posts are skipped so an old pinned post never masquerades as today's. */
   if (process.env.APIFY_TOKEN) {
-    const cacheName = "ig:" + name.toLowerCase();
-    try {
-      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-      if (c && c.length) return { posts: c, source: "instagram-apify", note: "read via Apify (cached ~15 min to save credits)" };
-    } catch (e) { /* cache miss is fine */ }
-    let items;
-    try {
-      items = await apifyItems("apify~instagram-post-scraper", {
-        username: [name], resultsLimit: 25, skipPinnedPosts: true, onlyPostsNewerThan: sinceDate(12),
-      });
-    } catch (err) {
-      const stale = await staleRead(cacheName);
-      if (stale) return { posts: stale, source: "instagram-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
-      throw err;
-    }
-    const posts = items.map(it => {
-      const ms = new Date(it.timestamp || 0).getTime();
-      const id = String(it.id || it.shortCode || "").trim();
-      if (!id || !isFinite(ms)) return null;
-      /* a tagged / reshared post carries someone else's ownerUsername — not this channel's own */
-      if (it.ownerUsername && it.ownerUsername.toLowerCase() !== name.toLowerCase()) return null;
-      const t = String(it.type || "");
-      return {
-        externalId: id, ts: new Date(ms).toISOString(),
-        kind: t === "Sidecar" ? "carousel"
-            : t === "Video" ? (it.productType === "clips" ? "reel" : "video") : "image",
-        text: String(it.caption || ""),
-        permalink: it.url || (it.shortCode ? "https://www.instagram.com/p/" + it.shortCode + "/" : ""),
-        likes: num(it.likesCount), comments: num(it.commentsCount),
-        views: num(it.videoViewCount), duration: num(it.videoDuration),
-        thumb: it.displayUrl || "",
-      };
-    }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    if (!posts.length) throw new Error("Apify returned no Instagram posts for @" + name + " — treat this as unknown, not empty.");
-    try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
-    return { posts, source: "instagram-apify", note: "read server-side via Apify" };
+    return apifyRead("instagram", "ig:" + name.toLowerCase(), {
+      username: [name], resultsLimit: APIFY_MAX_POSTS, skipPinnedPosts: true, dataDetailLevel: "basicData",
+    }, items => igParseApify(items, name), "@" + name);
   }
 
+  /* Without a token: Instagram's own public profile endpoint. It answers a home IP but usually
+     refuses a datacenter one (429 in ~25 ms) — the daily check then asks the extension instead. */
   const r = await get(
     "https://www.instagram.com/api/v1/users/web_profile_info/?username=" + encodeURIComponent(name),
     { "X-IG-App-ID": IG_APP_ID, Accept: "application/json" }
@@ -1086,7 +1199,7 @@ async function collectInstagram(ch) {
   if (r.status !== 200) {
     let msg = "Instagram returned HTTP " + r.status;
     try { const j = JSON.parse(r.body); if (j && j.message) msg += " — " + j.message; } catch (e) {}
-    throw new Error(msg);
+    throw new Error(msg + " (set APIFY_TOKEN to read Instagram server-side)");
   }
 
   let user;
@@ -1110,85 +1223,20 @@ async function collectInstagram(ch) {
   }).filter(p => p.externalId && p.ts);
 
   return {
-    posts,
+    posts, source: "instagram-public",
     meta: { totalPosts: media.count, followers: (user.edge_followed_by || {}).count },
-    note: "Public endpoint — returns about the last 12 posts" +
-          (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : ""),
+    note: "Public endpoint — returns about the last 12 posts",
   };
 }
 
-/* ═══════════════════ facebook — free, server-side, via a real headless browser ═══════════════════
-   Facebook has no public post list a server can read via a plain fetch — mbasic is gone and /posts
-   sits behind a login wall. What a full headless-browser navigation CAN reach: the ordinary page
-   (facebook.com/<page>) renders its own recent posts/reels as plain links with no login prompt, and
-   each individual post's own permalink page carries a complete caption in its og:title meta tag plus
-   an exact "creation_time" (epoch seconds) in its markup — verified directly, 2026-10-01, against
-   this project's own Facebook pages. Free, no Apify, no extension. */
+/* ═══════════════════ facebook ═══════════════════ */
+
 function fbTarget(ch) {
   const u = String(ch.url || "").trim();
   if (/facebook\.com/i.test(u)) return u.replace(/\/+$/, "");
   const h = String(ch.handle || "").replace(/^@/, "").trim();
   return h ? "https://www.facebook.com/" + h : "";
 }
-
-const FB_BROWSER_LIMIT = 8;
-/* Facebook's og:title reads "<the actual caption> | <Page Name>" — the page name is appended by
-   Facebook itself, not written by whoever posted, so it is trimmed off the same way igOgCaption
-   trims Instagram's own added prefix. Cut at the LAST " | " so a caption that itself contains
-   " | " (rare, but captions are free text) still keeps its own content intact. */
-function fbOgTitle(title) {
-  const s = String(title || "");
-  const i = s.lastIndexOf(" | ");
-  return i === -1 ? s : s.slice(0, i);
-}
-async function collectFacebookBrowser(pageUrl) {
-  return browserReader.withPage(async page => {
-    await page.goto(pageUrl, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
-
-    if (/\/login\/|\/checkpoint\//.test(page.url())) {
-      throw new Error("Facebook redirected this page to a login/checkpoint wall — treat as unknown, not empty.");
-    }
-
-    const hrefs = await page.$$eval(
-      'a[href*="/reel/"], a[href*="/videos/"], a[href*="/posts/"]',
-      els => [...new Set(els.map(e => (e.getAttribute("href") || "").split("?")[0]))].filter(Boolean)
-    );
-    if (!hrefs.length) {
-      throw new Error("Facebook's page rendered but no post/reel/video links were found — treat as unknown, not empty.");
-    }
-
-    const posts = [];
-    const seen = new Set();
-    for (const href of hrefs.slice(0, FB_BROWSER_LIMIT)) {
-      const id = (href.match(/\/(?:reel|videos|posts)\/(?:[^/]+\/)?(\d{10,})\/?$/) || [])[1];
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      const full = href.startsWith("http") ? href : "https://www.facebook.com" + href;
-      try {
-        await page.goto(full, { waitUntil: "domcontentloaded" });
-        await page.waitForTimeout(1200);
-        const html = await page.content();
-        const ct = (html.match(/"creation_time":(\d+)/) || [])[1];
-        if (!ct) continue;
-        const title = await page.$eval('meta[property="og:title"]', el => el.getAttribute("content")).catch(() => "");
-        const thumb = await page.$eval('meta[property="og:image"]', el => el.getAttribute("content")).catch(() => "");
-        posts.push({
-          externalId: id, ts: new Date(Number(ct) * 1000).toISOString(),
-          kind: href.includes("/reel/") ? "reel" : href.includes("/videos/") ? "video" : "text",
-          text: fbOgTitle(title), permalink: full, thumb: thumb || "",
-        });
-      } catch (e) { /* one unreadable permalink must not take the rest of the page down with it */ }
-    }
-    if (!posts.length) {
-      throw new Error("Facebook's page rendered links but no permalink could be read — treat as unknown, not empty.");
-    }
-    return { posts, source: "facebook-browser",
-             note: "read server-side via a headless browser page load — free, no login, no Apify" };
-  });
-}
-
-/* ═══════════════════ facebook — Apify fallback ═══════════════════ */
 
 /* FB items carry an ISO `time` and usually a numeric `timestamp` too — prefer the ISO one, and if
    only the number is there, read it as seconds or milliseconds by its magnitude. */
@@ -1199,193 +1247,80 @@ function fbWhen(it) {
   return NaN;
 }
 
-async function collectFacebook(ch) {
-  const pageUrl = fbTarget(ch);
-  if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
-
-  /* Browser-first: free, and this is now the only Facebook reader that works without a paid token —
-     see the comment above collectFacebookBrowser. Cached ~15 min like every other browser/Apify tier
-     here, so a burst of "Run daily check" clicks costs one browser run, not one each.
-     DISABLE_BROWSER_READER: see the identical comment in collectInstagram — Playwright's own network
-     calls are invisible to a stubbed global.fetch, so the test suite needs a way to turn this tier
-     off to exercise the Apify fallback in isolation. */
-  if (!process.env.DISABLE_BROWSER_READER) {
-    const cacheName = "fb-browser:" + pageUrl.toLowerCase();
-    try {
-      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-      if (c && c.length) return { posts: c, source: "facebook-browser", note: "read via headless browser (cached ~15 min)" };
-    } catch (e) { /* cache miss is fine */ }
-    try {
-      const out = await collectFacebookBrowser(pageUrl);
-      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
-      return out;
-    } catch (browserErr) {
-      var browserNote = String((browserErr && browserErr.message) || browserErr);
-    }
-  }
-  if (!process.env.APIFY_TOKEN) {
-    throw new Error(browserNote || "Facebook needs a working browser reader or an APIFY_TOKEN to be read server-side.");
-  }
-
-  const cacheName = "fb:" + pageUrl.toLowerCase();
-  try {
-    const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-    if (c && c.length) return { posts: c, source: "facebook-apify", note: "read via Apify (cached ~15 min to save credits)" };
-  } catch (e) { /* cache miss is fine */ }
-
-  let items;
-  try {
-    items = await apifyItems("apify~facebook-posts-scraper", {
-      startUrls: [{ url: pageUrl }], resultsLimit: 25, onlyPostsNewerThan: sinceDate(12),
-    });
-  } catch (err) {
-    const stale = await staleRead(cacheName);
-    if (stale) return { posts: stale, source: "facebook-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
-    throw err;
-  }
-  const posts = items.map(it => {
+/* apify/facebook-posts-scraper: postId, time/timestamp, text, url, media[], counts. captionText is
+   off — it transcribes a video's speech, which this check never reads and which is billed extra. */
+function fbParseApify(items) {
+  return items.map(it => {
+    if (!it || apifyItemError(it)) return null;
     const ms = fbWhen(it);
     const id = String(it.postId || it.facebookId || it.url || "").trim();
     if (!id || !isFinite(ms)) return null;
     const media = Array.isArray(it.media) ? it.media : [];
     const hasVideo = media.some(m => /video/i.test(String((m && (m.__typename || m.type)) || "")) || (m && m.videoUrl));
+    const reel = /\/reel\//.test(String(it.url || ""));
     return {
       externalId: id, ts: new Date(ms).toISOString(),
-      kind: hasVideo ? "video" : media.length > 1 ? "carousel" : media.length === 1 ? "photo" : (it.link ? "link" : "text"),
+      kind: reel ? "reel" : hasVideo ? "video" : media.length > 1 ? "carousel" : media.length === 1 ? "photo" : (it.link ? "link" : "text"),
       text: String(it.text || ""),
       permalink: it.url || it.facebookUrl || "",
       likes: num(it.likes), comments: num(it.comments), reposts: num(it.shares), views: num(it.viewsCount),
       thumb: (media[0] && (media[0].thumbnail || (media[0].photo_image && media[0].photo_image.uri))) || "",
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
-  if (!posts.length) throw new Error("Apify returned no Facebook posts for this page — treat this as unknown, not empty.");
-  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
-  return { posts, source: "facebook-apify",
-           note: "read server-side via Apify" + (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : "") };
 }
 
-/* ═══════════════════ tiktok — free, server-side, via a real headless browser ═══════════════════
-   A plain fetch of a TikTok profile renders the page shell but not the video list — the list is
-   filled by an XHR TikTok's own client JS signs with a token (msToken/X-Bogus) that a raw request
-   cannot reproduce. A real headless browser sidesteps this differently than it does for Instagram/
-   Facebook: instead of getting past a block, it runs TikTok's ACTUAL client code, which signs and
-   fires that request itself — the profile page's own embedded state
-   (#__UNIVERSAL_DATA_FOR_REHYDRATION__) is then read directly out of the DOM once hydration settles,
-   the same well-documented JSON shape TikTok's own front end reads to render the grid.
-
-   UNVERIFIED FROM THIS PROJECT'S OWN NETWORK: TikTok is blocked at the TCP level from this dev
-   environment and from the user's home ISP (both India-based — see the free-route-findings note in
-   memory), so this could not be tested end-to-end the way the Instagram and Facebook readers above
-   were. It needs a real run from Vercel to confirm the hydration actually happens the way it does for
-   the other two platforms. Apify remains directly below as the safety net while that is unconfirmed. */
-const TT_BROWSER_LIMIT = 8;
-function ttWalkItemModule(data) {
-  /* the shape is roughly { ItemModule: { "<id>": { id, desc, createTime, author, video:{...} } } } */
-  const scope = data && (data.__DEFAULT_SCOPE__ || data);
-  const mod = (scope && scope["webapp.video-detail"] && scope["webapp.video-detail"].itemInfo) ? null
-            : (data && data.ItemModule) || (scope && scope.ItemModule)
-            || (scope && scope["webapp.user-detail"] && scope["webapp.user-detail"].itemModule) || null;
-  return mod || {};
-}
-async function collectTiktokBrowser(name) {
-  return browserReader.withPage(async page => {
-    await page.goto("https://www.tiktok.com/@" + encodeURIComponent(name), { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(4000);
-
-    const raw = await page.$eval("#__UNIVERSAL_DATA_FOR_REHYDRATION__", el => el.textContent).catch(() => null);
-    if (!raw) throw new Error("TikTok's rehydration data script was not found on the profile page — treat as unknown, not empty.");
-    let data;
-    try { data = JSON.parse(raw); } catch (e) { throw new Error("TikTok's rehydration data was not valid JSON — the page shape may have changed."); }
-
-    const items = ttWalkItemModule(data);
-    const ids = Object.keys(items);
-    if (!ids.length) throw new Error("TikTok's own rehydration data carried no videos for this profile — treat as unknown, not empty.");
-
-    const posts = ids.slice(0, TT_BROWSER_LIMIT).map(id => {
-      const it = items[id] || {};
-      const ms = Number(it.createTime) * 1000;
-      if (!it.id || !isFinite(ms)) return null;
-      const owner = String((it.author && (it.author.uniqueId || it.author)) || "").toLowerCase();
-      if (owner && owner !== name.toLowerCase()) return null;
-      const v = it.video || {};
-      return {
-        externalId: String(it.id), ts: new Date(ms).toISOString(), kind: "video",
-        text: String(it.desc || ""),
-        permalink: "https://www.tiktok.com/@" + name + "/video/" + it.id,
-        duration: num(v.duration), thumb: v.cover || v.originCover || "",
-        views: num(it.stats && it.stats.playCount), likes: num(it.stats && it.stats.diggCount),
-        comments: num(it.stats && it.stats.commentCount), reposts: num(it.stats && it.stats.shareCount),
-      };
-    }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    if (!posts.length) throw new Error("TikTok's rehydration data had entries but none matched this profile — treat as unknown, not empty.");
-    return { posts, source: "tiktok-browser",
-             note: "read server-side via a headless browser page load — free, no Apify (unverified from this network — see code comment)" };
-  });
+/* Facebook has no public post list a server can read — mbasic is gone and /posts sits behind a
+   login wall — so without APIFY_TOKEN the dispatcher below never calls this; it reports the channel
+   as one for the extension instead. */
+async function collectFacebook(ch) {
+  const pageUrl = fbTarget(ch);
+  if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
+  if (!process.env.APIFY_TOKEN) throw new Error("Facebook needs APIFY_TOKEN to be read server-side.");
+  return apifyRead("facebook", "fb:" + pageUrl.toLowerCase(), {
+    startUrls: [{ url: pageUrl }], resultsLimit: APIFY_MAX_POSTS, captionText: false,
+  }, fbParseApify, pageUrl.replace(/^https?:\/\/(www\.)?/, ""));
 }
 
-/* ═══════════════════ tiktok — Apify fallback ═══════════════════ */
+/* ═══════════════════ tiktok ═══════════════════ */
 
-/* TikTok blocks server requests and has no free public feed, but Apify's scraper reads a profile's
-   recent videos server-side — same shape as the Facebook/Instagram readers, same APIFY_TOKEN, same
-   cache-then-stale fallback. A reshare carries someone else's authorMeta, so it is dropped. */
-async function collectTiktok(ch) {
-  const name = ttTarget(ch);
-  if (!name) throw new Error("No TikTok username could be read from this channel");
-
-  if (!process.env.DISABLE_BROWSER_READER) {
-    const cacheName = "tt-browser:" + name.toLowerCase();
-    try {
-      const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-      if (c && c.length) return { posts: c, source: "tiktok-browser", note: "read via headless browser (cached ~15 min)" };
-    } catch (e) { /* cache miss is fine */ }
-    try {
-      const out = await collectTiktokBrowser(name);
-      try { await ingest.cacheSet(cacheName, out.posts); } catch (e) { /* caching is best-effort */ }
-      return out;
-    } catch (browserErr) {
-      var browserNote = String((browserErr && browserErr.message) || browserErr);
-    }
-  }
-  if (!process.env.APIFY_TOKEN) {
-    throw new Error(browserNote || "TikTok needs a working browser reader or an APIFY_TOKEN to be read server-side.");
-  }
-
-  const cacheName = "tt:" + name.toLowerCase();
-  try {
-    const c = await ingest.cacheGet(cacheName, 15 * 60e3);
-    if (c && c.length) return { posts: c, source: "tiktok-apify", note: "read via Apify (cached ~15 min to save credits)" };
-  } catch (e) { /* cache miss is fine */ }
-
-  let items;
-  try {
-    items = await apifyItems("clockworks~tiktok-scraper", {
-      profiles: [name], resultsPerPage: 25, profileScrapeSections: ["videos"],
-      profileSorting: "latest", excludePinnedPosts: true, oldestPostDateUnified: sinceDate(12),
-    });
-  } catch (err) {
-    const stale = await staleRead(cacheName);
-    if (stale) return { posts: stale, source: "tiktok-apify", note: "Apify was slow — showing the last good read (" + (err.message || err) + ")" };
-    throw err;
-  }
-  const posts = items.map(it => {
+/* clockworks/tiktok-scraper, profile "videos" tab, newest first, pinned videos excluded — an old
+   pinned video must never read as today's. Every download option is off (each is billed on its
+   own) and so is the proxy-country choice (a paid add-on). No date filter either: on this actor it
+   is a paid add-on, and an earlier run that used one came back with nothing at all. A reshare
+   carries someone else's authorMeta and is dropped. */
+function ttParseApify(items, name) {
+  const me = name.toLowerCase();
+  return items.map(it => {
+    if (!it || apifyItemError(it)) return null;
     const ms = new Date(it.createTimeISO || (it.createTime ? it.createTime * 1000 : 0)).getTime();
     const id = String(it.id || "").trim();
-    if (!id || !isFinite(ms)) return null;
+    if (!id || !isFinite(ms) || ms <= 0) return null;
     const owner = String((it.authorMeta && (it.authorMeta.name || it.authorMeta.uniqueId)) || "").toLowerCase();
-    if (owner && owner !== name.toLowerCase()) return null;   // a reshare of someone else's video
+    if (owner && owner !== me) return null;
     return {
       externalId: id, ts: new Date(ms).toISOString(), kind: "video",
       text: String(it.text || ""),
       permalink: it.webVideoUrl || ("https://www.tiktok.com/@" + name + "/video/" + id),
       views: num(it.playCount), likes: num(it.diggCount), comments: num(it.commentCount), reposts: num(it.shareCount),
       duration: num(it.videoMeta && it.videoMeta.duration),
-      thumb: (it.videoMeta && (it.videoMeta.coverUrl || it.videoMeta.cover || it.videoMeta.originalCoverUrl)) || "",
+      thumb: (it.videoMeta && (it.videoMeta.coverUrl || it.videoMeta.originalCoverUrl)) || "",
     };
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
-  if (!posts.length) throw new Error("Apify returned no TikTok posts for @" + name + " — treat this as unknown, not empty.");
-  try { await ingest.cacheSet(cacheName, posts); } catch (e) { /* caching is best-effort */ }
-  return { posts, source: "tiktok-apify",
-           note: "read server-side via Apify" + (browserNote ? " (the headless-browser reader failed first: " + browserNote + ")" : "") };
+}
+
+/* TikTok refuses server requests outright and has no free public feed: Apify is the only server
+   route. Without a token it is reported as unknown, never as empty. */
+async function collectTiktok(ch) {
+  const name = ttTarget(ch);
+  if (!name) throw new Error("No TikTok username could be read from this channel");
+  if (!process.env.APIFY_TOKEN) throw new Error("TikTok needs APIFY_TOKEN to be read server-side.");
+  return apifyRead("tiktok", "tt:" + name.toLowerCase(), {
+    profiles: [name], resultsPerPage: APIFY_MAX_POSTS, profileScrapeSections: ["videos"],
+    profileSorting: "latest", excludePinnedPosts: true,
+    shouldDownloadVideos: false, shouldDownloadCovers: false, shouldDownloadSlideshowImages: false,
+    shouldDownloadAvatars: false, shouldDownloadMusicCovers: false,
+    downloadSubtitlesOptions: "NEVER_DOWNLOAD_SUBTITLES", proxyCountryCode: "None",
+  }, items => ttParseApify(items, name), "@" + name);
 }
 
 /* ═══════════════════ telegram bot (1:1 DMs, via a user session) ═══════════════════ */
@@ -1471,15 +1406,13 @@ async function collectViber(ch) {
 
 /* ═══════════════════ dispatch ═══════════════════ */
 
-/* Facebook is collectable, just not from here — the extension handles it. TikTok is not
-   collectable at all: it refuses server requests and the extension does not cover it either.
-   Saying "use the extension" for TikTok would send someone to a tool that will never report it,
-   so the two cases are kept distinct. Facebook used to live here too — see collectFacebookBrowser
-   for why it no longer needs the extension or a paid token at all. */
-const BROWSER_ONLY = {};
-/* Nothing is outright unsupported any more — TikTok now reads server-side via Apify (collectTiktok)
-   when APIFY_TOKEN is set, and reports "unknown" honestly when it is not. Kept for future platforms. */
-const UNSUPPORTED = {};
+/* Without APIFY_TOKEN there is no server route at all for Facebook or TikTok, so they are handed to
+   the browser extension up front instead of being reported as failures. Instagram still tries its
+   public endpoint and X its free page read first — both can answer from some networks. */
+const NEEDS_APIFY = {
+  facebook: "Facebook has no public post list a server can read — set APIFY_TOKEN, or collect it with the browser extension.",
+  tiktok: "TikTok refuses server requests — set APIFY_TOKEN, or collect it with the browser extension.",
+};
 
 /* platform:handle, lowercased — the same first-path-segment handle every collector above already
    extracts, so a pusher only ever needs to know the public name on the URL, never an internal id */
@@ -1531,13 +1464,8 @@ async function collectOne(ch, cutoff, pushedAll) {
     }
   } catch (err) { /* an unreachable store must never take a readable channel down with it */ }
 
-  if (UNSUPPORTED[ch.platform]) {
-    return { ...base, source: "unsupported", unsupported: true, note: UNSUPPORTED[ch.platform] };
-  }
-
-  const browserOnlyNote = BROWSER_ONLY[ch.platform];
-  if (browserOnlyNote) {
-    return { ...base, source: "browser-required", browserRequired: true, note: browserOnlyNote };
+  if (NEEDS_APIFY[ch.platform] && !process.env.APIFY_TOKEN) {
+    return { ...base, source: "browser-required", browserRequired: true, note: NEEDS_APIFY[ch.platform] };
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
@@ -1546,8 +1474,10 @@ async function collectOne(ch, cutoff, pushedAll) {
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
+  const paid = !!process.env.APIFY_TOKEN;
   const source = { youtube: "youtube-web", telegram: "telegram-web",
-                   instagram: "instagram-public", x: "x-web", facebook: "facebook-apify",
+                   instagram: paid ? "instagram-apify" : "instagram-public", x: paid ? "x-apify" : "x-web",
+                   facebook: "facebook-apify",
                    tiktok: "tiktok-apify", tgbot: "telegram-mtproto", viber: "ingest" }[ch.platform];
   try {
     /* the window is handed to the collector so it can stop reading once it is past it —
@@ -1556,13 +1486,17 @@ async function collectOne(ch, cutoff, pushedAll) {
     const posts = out.posts
       .filter(p => !cutoff || new Date(p.ts).getTime() >= cutoff)
       .sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    /* cost: what this channel's Apify run billed (Apify's own figure), { usd: 0, cached: true } for a
+       cached read, absent for the free readers. partialRead: the run hit its time budget. */
     return { ...base, ok: true, source: out.source || source, posts, note: out.note || "",
-             resolved: out.resolved || null, meta: out.meta || null };
+             resolved: out.resolved || null, meta: out.meta || null,
+             cost: out.cost || null, partialRead: !!out.partialRead };
   } catch (err) {
     return {
       ...base, source,
       note: String(err.message || err),
       dead: !!err.dead,
+      cost: err.cost || null,              // a run that read nothing can still have been billed
       /* instagram is the flaky one by design, so tell the UI it is worth trying in the browser */
       browserRequired: ch.platform === "instagram" && !err.dead,
     };
@@ -1606,11 +1540,18 @@ module.exports = async (req, res) => {
 
   const results = await Promise.all(channels.map(c => collectOne(c, cutoff, pushedAll)));
 
+  /* What this request actually spent on Apify, summed from each run's own record. Cached reads
+     count as 0; a run whose record carried no figure is counted in apifyRuns but not in the sum. */
+  const runs = results.map(r => r.cost).filter(c => c && !c.cached);
+  const apifyCostUsd = Math.round(runs.reduce((t, c) => t + (c.usd || 0), 0) * 1e6) / 1e6;
+
   return res.status(200).json({
     ok: true,
     collectedAt: new Date().toISOString(),
     hours,
     days: Math.round(hours / 24),
+    apifyCostUsd,
+    apifyRuns: runs.length,
     results,
   });
 };
