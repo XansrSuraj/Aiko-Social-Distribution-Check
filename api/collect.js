@@ -114,12 +114,16 @@ const APIFY_MAX_POSTS = Math.max(1, Math.min(50, Math.floor(Number(process.env.A
 
 /* Free-plan ("FREE" tier) event prices, read from each actor's own pricing on 2026-10-02 — used only
    to set a per-run spending cap at twice the expected charge. The cost actually REPORTED for a run
-   is Apify's own figure from the run record, never this estimate. */
+   is Apify's own figure from the run record, never this estimate.
+     minCap    — the lowest maxTotalChargeUsd the actor accepts (its minimalMaxTotalChargeUsd). The
+                 TikTok actor refuses to start below $0.50 outright; that is only a ceiling, the run
+                 is still billed per video.
+     itemEvent — the event the actor bills once per dataset item; how a settled run is recognised. */
 const APIFY_ACTORS = {
-  instagram: { id: "apify~instagram-post-scraper", memory: 512,  start: 0,     perPost: 0.0017 },
-  facebook:  { id: "apify~facebook-posts-scraper", memory: 2048, start: 0.001, perPost: 0.005 },
-  tiktok:    { id: "clockworks~tiktok-scraper",    memory: 2048, start: 0.001, perPost: 0.0037 },
-  x:         { id: "xquik~x-tweet-scraper",         memory: 256,  start: 0,     perPost: 0.00015 },
+  instagram: { id: "apify~instagram-post-scraper", memory: 512,  start: 0,     perPost: 0.0017,  minCap: 0.005,  itemEvent: "post" },
+  facebook:  { id: "apify~facebook-posts-scraper", memory: 2048, start: 0.001, perPost: 0.005,   minCap: 0.0062, itemEvent: "post" },
+  tiktok:    { id: "clockworks~tiktok-scraper",    memory: 2048, start: 0.001, perPost: 0.0037,  minCap: 0.5,    itemEvent: "result" },
+  x:         { id: "xquik~x-tweet-scraper",         memory: 256,  start: 0,     perPost: 0.00015, minCap: 0,      itemEvent: "apify-default-dataset-item" },
 };
 const apifyExpectedUsd = platform => {
   const a = APIFY_ACTORS[platform];
@@ -168,11 +172,12 @@ function apifyError(res) {
 
 /* The cost of one run, from Apify's own run record. usageTotalUsd is what Apify bills for the run;
    chargedEventCounts says what it was for (e.g. { post: 6, "actor-start": 1 }). */
-function apifyCost(run) {
+function apifyCost(run, settled) {
   return {
     runId: run.id, status: run.status,
     usd: typeof run.usageTotalUsd === "number" ? run.usageTotalUsd : null,
     events: run.chargedEventCounts || null,
+    settled: !!settled,
     cached: false,
   };
 }
@@ -183,11 +188,13 @@ async function apifyRun(platform, input) {
   const a = APIFY_ACTORS[platform];
   const deadline = Date.now() + APIFY_BUDGET_MS;
   const left = () => deadline - Date.now();
-  const cap = Math.max(0.01, Math.round(apifyExpectedUsd(platform) * 2 * 10000) / 10000);
+  let cap = Math.max(0.01, a.minCap, Math.round(apifyExpectedUsd(platform) * 2 * 10000) / 10000);
 
   /* Started with a bounded retry while the account's concurrent-memory cap is momentarily full —
-     another channel's run from the same daily check may still be finishing. Anything else is final. */
-  let start;
+     another channel's run from the same daily check may still be finishing. An actor that raises its
+     minimum cap later says so in the refusal ("less than the allowed minimum of $0.50"); that is
+     accepted once, up to $1, rather than the channel going unread until the code is changed. */
+  let start, raised = false;
   for (let attempt = 0; ; attempt++) {
     start = await apifyCall("POST", `/acts/${a.id}/runs`, {
       memory: a.memory,
@@ -196,7 +203,10 @@ async function apifyRun(platform, input) {
       waitForFinish: Math.max(1, Math.min(60, Math.floor(left() / 1000) - 10)),
     }, input, Math.min(left(), 75000));
     if (start.status === 200 || start.status === 201) break;
-    if (/memory limit|concurrent/i.test(apifyMessage(start)) && attempt < 4 && left() > 40000) {
+    const msg = apifyMessage(start);
+    const min = Number((msg.match(/allowed minimum of \$\s*([\d.]+)/i) || [])[1]);
+    if (!raised && min > cap && min <= 1) { cap = min; raised = true; continue; }
+    if (/memory limit|concurrent/i.test(msg) && attempt < 4 && left() > 40000) {
       await sleep(5000 + attempt * 3000);
       continue;
     }
@@ -225,18 +235,27 @@ async function apifyRun(platform, input) {
     { clean: 1, format: "json" }, null, Math.max(8000, Math.min(left(), 20000)));
   const items = ds.status === 200 && Array.isArray(ds.json) ? ds.json : [];
 
-  /* the run record is final only once the run has stopped; read it once more for the exact cost */
-  try {
-    const fin = await apifyCall("GET", `/actor-runs/${run.id}`, null, null, 8000);
-    if (fin.status === 200 && fin.json && fin.json.data) run = fin.json.data;
-  } catch (e) { /* keep the last record we had */ }
+  /* Apify settles a run's charges a few seconds AFTER the run stops: read straight away, a run that
+     returned six posts still showed { post: 0 } and $0 (measured 2026-10-02 — the figures caught up
+     a minute later). So the record is re-read until the per-item charge has caught up with the
+     items actually returned, for up to ~10 s; past that the figure is reported as not settled. */
+  const settled = r => ((r.chargedEventCounts || {})[a.itemEvent] || 0) >= items.length;
+  let done = false;
+  for (let i = 0; i < 7 && left() > 4000; i++) {
+    if (i) await sleep(1500);
+    try {
+      const fin = await apifyCall("GET", `/actor-runs/${run.id}`, null, null, 6000);
+      if (fin.status === 200 && fin.json && fin.json.data) run = fin.json.data;
+    } catch (e) { /* keep the last record we had */ }
+    if ((done = settled(run))) break;
+  }
 
   if (!items.length && run.status !== "SUCCEEDED") {
     throw new Error(`Apify run ${run.status.toLowerCase()}` +
       (run.statusMessage ? `: ${String(run.statusMessage).slice(0, 160)}` : "") +
       " — treat this channel as unknown, not empty");
   }
-  return { items, cost: apifyCost(run), partial };
+  return { items, cost: apifyCost(run, done), partial };
 }
 
 /* An actor reports a profile it could not read (private, age-restricted, removed) as an item with

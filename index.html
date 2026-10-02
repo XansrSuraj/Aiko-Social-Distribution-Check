@@ -1957,7 +1957,7 @@ async function collectServer(o){
   const parts = await Promise.all(groups.map(one));
 
   let added = 0, ok = 0, browser = 0, unreached = 0, collectedAt = null;
-  let spent = 0, runs = 0, cachedN = 0;
+  let spent = 0, runs = 0, cachedN = 0, unsettled = 0;
   for(const j of parts){
     if((!j.results || !j.results.length) && j.error){ unreached += (j._batch || []).length; continue; }
     collectedAt = j.collectedAt || collectedAt;
@@ -1965,6 +1965,7 @@ async function collectServer(o){
     for(const res of j.results){
       const cost = res.cost || null;
       if(cost && cost.cached) cachedN++;
+      else if(cost && cost.settled === false) unsettled++;
       checks.meta[res.channelId] = { ok:res.ok, note:res.note, source:res.source,
         browserRequired:!!res.browserRequired, unsupported:!!res.unsupported,
         dead:!!res.dead, at:Date.now(),
@@ -1982,12 +1983,15 @@ async function collectServer(o){
      the remaining credit by; a press that hit the cache would understate it. */
   const usd = Math.round(spent * 1e6) / 1e6;
   if(runs || cachedN){
-    checks.apifyLast = { usd, runs, cached:cachedN, at:new Date().toISOString() };
-    if(runs && !cachedN && !unreached) checks.apifyPerCheck = usd;
+    /* Apify settles a run's charges a few seconds after it stops; the server waits for that, but a
+       figure it could not confirm in time may still read low, so it is never taken as the price */
+    checks.apifyLast = { usd, runs, cached:cachedN, settled:!unsettled, at:new Date().toISOString() };
+    if(runs && !cachedN && !unreached && !unsettled) checks.apifyPerCheck = usd;
   }
   saveChecks();
   toast(`${ok} channel(s) read, ${added} new post(s)`
-        + (runs ? ` · Apify $${usd.toFixed(4)} for ${runs} run(s)` : cachedN ? " · Apify: cached, $0" : "")
+        + (runs ? ` · Apify $${usd.toFixed(4)} for ${runs} run(s)${unsettled ? " (still settling)" : ""}`
+                : cachedN ? " · Apify: cached, $0" : "")
         + (browser ? ` · ${browser} need the extension` : "")
         + (unreached ? ` · ${unreached} could not be reached (will use the extension / last read)` : ""),
         ok ? "check-check" : "triangle-alert");
@@ -2472,7 +2476,8 @@ function dailyCheckModal(o){
     const apifyNote = (() => {
       const bits = [];
       const last = checks.apifyLast;
-      if(last) bits.push(last.runs ? `last press ${money(last.usd)}` : "last press cached · $0");
+      if(last) bits.push(last.runs ? `last press ${money(last.usd)}${last.settled === false ? " (still settling)" : ""}`
+                                   : "last press cached · $0");
       const ai = apifyInfo;
       if(ai && ai.ok && ai.configured && ai.remainingUsd != null){
         bits.push(`${money(ai.remainingUsd)} of ${money(ai.limitUsd)} left`);

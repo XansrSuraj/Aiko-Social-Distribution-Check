@@ -29,9 +29,12 @@ const check = (good, label, extra) => { good ? pass++ : fail++; console.log(`  $
 const ACTOR_KEY = u => /instagram-post-scraper/.test(u) ? "ig" : /facebook-posts-scraper/.test(u) ? "fb"
                      : /tiktok-scraper/.test(u) ? "tt" : /x-tweet-scraper/.test(u) ? "x" : null;
 const COST = { ig: 0.0102, fb: 0.031, tt: 0.0232, x: 0.0009 };
+const ITEM_EVENT = { ig: "post", fb: "post", tt: "result", x: "apify-default-dataset-item" };
 
 /* A fake Apify. opts.pending: the run answers RUNNING first and SUCCEEDED on the next poll.
-   opts.startFail: a list of {status, message} answers the start call gives before it succeeds. */
+   opts.startFail: a list of {status, message} answers the start call gives before it succeeds.
+   opts.lateCharges: like the real thing (measured 2026-10-02), the first records after the run
+   stops still show the items as uncharged and $0; the settled figure only appears on a later read. */
 function fakeApify(itemsByActor, opts) {
   const o = opts || {};
   const calls = [];
@@ -39,6 +42,12 @@ function fakeApify(itemsByActor, opts) {
   let seq = 0;
   const startFail = (o.startFail || []).slice();
   const json = (status, body) => ({ status, text: async () => JSON.stringify(body) });
+  const record = (id, r, status) => {
+    const n = (itemsByActor[r.key] || []).length;
+    const late = o.lateCharges && r.polls < (o.lateCharges === true ? 2 : o.lateCharges);
+    return { id, status, defaultDatasetId: "ds-" + id,
+             usageTotalUsd: late ? 0 : COST[r.key], chargedEventCounts: { [ITEM_EVENT[r.key]]: late ? 0 : n } };
+  };
   global.fetch = async (url, init) => {
     const u = String(url);
     const method = (init && init.method) || "GET";
@@ -54,13 +63,14 @@ function fakeApify(itemsByActor, opts) {
       const key = ACTOR_KEY(m[1]);
       const id = "run" + (++seq);
       runs[id] = { key, polls: 0 };
-      return json(201, { data: { id, status: o.pending ? "RUNNING" : "SUCCEEDED", defaultDatasetId: "ds-" + id,
-                                 usageTotalUsd: COST[key], chargedEventCounts: { post: 6 } } });
+      return json(201, { data: { ...record(id, runs[id], o.pending ? "RUNNING" : "SUCCEEDED"),
+                                 ...(o.lateCharges ? { usageTotalUsd: 0, chargedEventCounts: {} } : {}) } });
     }
     if (method === "GET" && (m = p.match(/^\/actor-runs\/([^/]+)$/))) {
-      const r = runs[m[1]]; r.polls++;
-      return json(200, { data: { id: m[1], status: "SUCCEEDED", defaultDatasetId: "ds-" + m[1],
-                                 usageTotalUsd: COST[r.key], chargedEventCounts: { post: 6 } } });
+      const r = runs[m[1]];
+      const rec = record(m[1], r, "SUCCEEDED");
+      r.polls++;
+      return json(200, { data: rec });
     }
     if (method === "GET" && (m = p.match(/^\/datasets\/ds-([^/]+)\/items$/))) {
       return json(200, itemsByActor[runs[m[1]].key] || []);
@@ -128,7 +138,8 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
       "basicData (no per-post details charge), pinned skipped, 6 posts, no date filter", JSON.stringify(s.body));
     check(q(s, "memory") === "512" && Number(q(s, "maxTotalChargeUsd")) > 0,
       "memory is pinned and a spending cap is set on the run", `memory=${q(s, "memory")} cap=${q(s, "maxTotalChargeUsd")}`);
-    check(res.cost && res.cost.usd === COST.ig && res.cost.cached === false && res.cost.events.post === 6,
+    check(res.cost && res.cost.usd === COST.ig && res.cost.cached === false && res.cost.settled === true &&
+          res.cost.events.post === 3,
       "the result carries the run's own billed cost", JSON.stringify(res.cost));
     check(payload.apifyCostUsd === COST.ig && payload.apifyRuns === 1, "the response totals what the request spent",
       `apifyCostUsd=${payload.apifyCostUsd} runs=${payload.apifyRuns}`);
@@ -185,6 +196,8 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
           b.downloadSubtitlesOptions === "NEVER_DOWNLOAD_SUBTITLES" && b.proxyCountryCode === "None",
       "every separately-billed download and the paid proxy country are off");
     check(q(s, "memory") === "2048", "memory pinned so the whole check fits the free plan's 8 GB", q(s, "memory"));
+    check(Number(q(s, "maxTotalChargeUsd")) >= 0.5,
+      "the cap meets the actor's own $0.50 minimum — below it the run is refused before it starts", q(s, "maxTotalChargeUsd"));
   }
 
   console.log("\n── X via Apify");
@@ -241,6 +254,31 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     const { res, calls } = await collect([X], { x: [{ id: "5", createdAt: ago(5), text: "d", author: { username: "Sportsfcvn" } }] },
       { startFail: [{ status: 402, message: "By launching this job you will exceed the memory limit of 8192MB for all your Actor runs" }] });
     check(res.ok && started(calls).length === 2, "retried once the memory frees up", `starts=${started(calls).length} note=${res.note}`);
+  }
+
+  console.log("\n── charges that settle after the run stops are waited for, not reported as $0");
+  {
+    await wipeCache();
+    const items = [{ shortCode: "L1", timestamp: ago(5), type: "Image", caption: "a", ownerUsername: "sportsfcvn" },
+                   { shortCode: "L2", timestamp: ago(9), type: "Image", caption: "b", ownerUsername: "sportsfcvn" }];
+    const { res, payload } = await collect([IG], { ig: items }, { lateCharges: true });
+    check(res.ok && res.cost.usd === COST.ig && res.cost.settled === true && res.cost.events.post === 2,
+      "the reported cost is the settled one", JSON.stringify(res.cost));
+    check(payload.apifyCostUsd === COST.ig, "and so is the request total", String(payload.apifyCostUsd));
+  }
+
+  console.log("\n── an actor that raises its minimum cap is met once, not left unread");
+  {
+    await wipeCache();
+    const { res, calls } = await collect([X], { x: [{ id: "4", createdAt: ago(5), text: "d", author: { username: "Sportsfcvn" } }] },
+      { startFail: [{ status: 400, message: "Maximum cost per run is less than the allowed minimum of $0.25" }] });
+    const st = started(calls);
+    check(res.ok && st.length === 2 && Number(q(st[1], "maxTotalChargeUsd")) === 0.25,
+      "retried once with the minimum the refusal named", `starts=${st.length} cap=${st[1] && q(st[1], "maxTotalChargeUsd")}`);
+    await wipeCache();
+    const big = await collect([X], {}, { startFail: [{ status: 400, message: "Maximum cost per run is less than the allowed minimum of $5.00" }] });
+    check(big.res.ok === false && started(big.calls).length === 1,
+      "but never past $1 — an outsized minimum is reported, not silently accepted", big.res.note.slice(0, 80));
   }
 
   console.log("\n── an exhausted monthly credit is named as such");
