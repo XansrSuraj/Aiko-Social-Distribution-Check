@@ -80,6 +80,26 @@ for (const t of EN) {
   const d = M.detectLang(t);
   ok(d.lang === "en", `en: "${t.slice(0, 44)}…"`, d.lang || "(none)");
 }
+/* Portuguese (the Brazil region, 2026-10-03) — real captions from sportsfc.br. Its á é ã õ are also
+   Vietnamese tone marks, so letters alone would have called these Vietnamese. */
+const PT = [
+  "Espanha vai impor seu ritmo e buscar a vitória contra a República Tcheca?",
+  "França vai impor seu ritmo ou a Itália vai surpreender? 🔥 📊 SPORTSFC.FANS",
+  "Bélgica vai conseguir furar a defesa da Turquia? ⚔️🔥 📊 SPORTSFC.FANS",
+  "⚔️ A Dinamarca vai conseguir furar a defesa portuguesa? 🔥 📊 SPORTSFC.FANS",
+  "Lamine Yamal já é o melhor do mundo? O jovem Lamine Yamal lidera o ranking",
+  "Argentina vai conseguir superar a Bolívia? 🔥 📊 SPORTSFC.FANS 🏆 Jogo",
+];
+for (const t of PT) {
+  const d = M.detectLang(t);
+  ok(d.lang === "pt", `pt: "${t.slice(0, 44)}…"`, d.lang || "(none)");
+}
+ok(M.normLang("portuguese") === "pt" && M.normLang("Brazil") === "pt", "a channel noted Portuguese / Brazil is pt");
+/* the two existing languages must not drift toward Portuguese */
+ok(M.detectLang("Tây Ban Nha có thể khuất phục được Séc? Ai sẽ là người làm chủ trận đấu?").lang === "vi",
+  "a Vietnamese caption stays Vietnamese");
+ok(M.detectLang("Can Kevin De Bruyne break the defense? Who are you backing tonight?").lang === "en",
+  "an English caption naming 'De Bruyne' stays English");
 ok(M.detectLang("ผลบอลวันนี้ ดูสดฟรี").lang === "th", "th: Thai script");
 ok(M.detectLang("今天的足球比赛结果").lang === "zh", "zh: Chinese characters");
 ok(M.detectLang("🔥🐐⚽️ #football #reels").lang === "", "no language from emoji and hashtags alone");

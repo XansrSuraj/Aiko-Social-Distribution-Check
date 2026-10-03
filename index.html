@@ -764,6 +764,13 @@ const SPORTSFC = {
        statusCode 10221 for it, exactly as for a made-up handle). @sportsfc.vn carries the same drops
        at the same minutes as every other VN channel, sfc.my links included. */
     { id:"tt-vn",   platform:"tiktok",    url:"https://www.tiktok.com/@sportsfc.vn",   handle:"sportsfc.vn",   note:"vietnamese" },
+    /* Brazil (added 2026-10-03): Portuguese, its own schedule — about two posts a day, some the same
+       drop as VN/EN, some not — so it is reported as its own REGION (see REGIONS), never measured
+       against the Vietnam/English drops. ytChannelId read off the channel page. */
+    { id:"fb-br",   platform:"facebook",  url:"https://www.facebook.com/sportsfc.br", handle:"sportsfc.br", note:"portuguese", region:"br" },
+    { id:"ig-br",   platform:"instagram", url:"https://www.instagram.com/sportsfc.br", handle:"sportsfc.br", note:"portuguese", region:"br" },
+    { id:"yt-br",   platform:"youtube",   url:"https://www.youtube.com/@sfc-br",       handle:"@sfc-br",     note:"portuguese", region:"br",
+      ytChannelId:"UCR6OeH8jO7RMFDkx0Rfdv0w" },
     { id:"tg-bot-vn", platform:"tgbot",   url:"https://t.me/SportsfcBot",              handle:"SportsfcBot",   note:"vietnamese" },
     { id:"vb-vn",   platform:"viber",     url:"https://invite.viber.com/?g2=AQBb1E9bG9aYOFaoK6NCZWomB5NyKXRWW9B%2B88qnMHECatqiPo6UvpuEjWAoMEHN", handle:"Sportsfc.vn",   note:"vietnamese" },
     { id:"vb-fans", platform:"viber",     url:"https://invite.viber.com/?g2=AQBYisJhU5NX0laoK25C7uTANpWbuOE7yZ5xBjKrXwcjgcUIZdgXex9Sc%2Bi0Twir",       handle:"Sportsfc.fans", note:"english" },
@@ -1011,7 +1018,8 @@ function mergePosts(channelId, incoming){
    Language lives in the channel's free-text note and is typo-prone ("chaina"), so match
    loosely onto ISO codes — otherwise a misspelling silently splits a language group. */
 const LANGS = [["vi", /viet|\bvn\b|tiếng|tieng/i], ["th", /thai|\bth\b/i],
-               ["zh", /chin|chai|\bcn\b|中文|mandarin/i], ["en", /eng|\ben\b/i]];
+               ["zh", /chin|chai|\bcn\b|中文|mandarin/i], ["pt", /portug|brazil|brasil|\bpt\b|\bbr\b/i],
+               ["en", /eng|\ben\b/i]];
 function normLang(s){
   const t = String(s || "").trim();
   if(!t) return "";
@@ -1090,6 +1098,12 @@ const VN_UNIQUE = /[đĐăĂơƠưƯ]/g;
 const VN_TONES = /[àáảãạầấẩẫậằắẳẵặèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/gi;
 const VN_WORDS = /\b(và|của|không|người|được|những|trong|cho|với|các|là|có|để|này|khi|một|đã|sẽ|từ|như|trận|xem|ngay|bóng|đá|cầu|thủ|huyền|thoại|miễn|phí|câu|lạc|bộ|hâm|mộ|nhất|rất|thể|sự|nghiệp|cuộc|tranh|luận|tuổi|tác|chỉ|con|số|đến|nên|bàn|thắng|mùa|giải|đấu|trường|thời|đại)\b/gi;
 const EN_WORDS = /\b(the|and|for|with|this|that|your|you|are|our|from|all|new|watch|now|free|club|fans|match|his|her|was|were|has|have|one|two|three|four|five|when|what|who|how|but|not|more|most|just|about|into|over|after|before|only|than|then|them|they|their|there|been|being|would|could|should|will|can|did|does|goal|goals|team|game|season|player|players|legend|legends|career|careers|era|eras|question|choice|generation|generations|icons?|nation|whole|another|different|same|stage|number|age)\b/gi;
+/* Portuguese shares á é í ó ú ã õ with Vietnamese's tone marks, so letters cannot tell them apart —
+   its own function words can, plus ç, which Vietnamese never uses. Only words that are not also
+   English ("do", "no", "as", "time" are left out). Letter-boundaries, not \b: \b is ASCII-only and
+   would never match around "é" or "já". */
+const PT_WORDS = /(?<!\p{L})(de|da|das|dos|que|não|vai|com|para|uma|um|os|contra|seu|sua|mais|jogo|jogos|melhor|quem|ataque|defesa|vitória|conseguir|ou|é|já|pelo|pela|entre|sobre|ritmo|buscar|seleção|gols|partida|então|isso|esse|essa|ele|ela|muito|hoje|onde|quando|como|também|está|são|vamos|nós|furar|vencer|impor)(?!\p{L})/giu;
+const PT_ONLY = /[çÇ]/g;
 const RX_THAI = /[฀-๿]/;
 const RX_CJK = /[㐀-䶿一-鿿]/;
 const hits = (s, re) => (s.match(re) || []).length;
@@ -1121,7 +1135,13 @@ function detectLang(text){
      precisely what was seen ("3 VN letters — 4% of the text"), at the top, next to the flag. */
   const vnScore = vnw * 3 + vnLetters, enScore = enw * 3;
   const why = `${vnw} VN word(s) + ${vnLetters} VN letter(s) (${vnPct}% of the text) vs ${enw} EN word(s)`;
-  const out = extra => Object.assign({ vnPct, vnLetters, vnw, enw }, extra);
+  const ptw = hits(body, PT_WORDS), ptc = hits(body, PT_ONLY);
+  const out = extra => Object.assign({ vnPct, vnLetters, vnw, enw, ptw }, extra);
+
+  /* Portuguese first: its accents would otherwise be counted as Vietnamese tone marks. Only when no
+     Vietnamese-only letter is present, and its own words clearly outweigh both other signals. */
+  if(uniq === 0 && ptw >= 2 && ptw * 3 + ptc > Math.max(vnw * 3, enScore))
+    return out({ lang:"pt", why:`${ptw} PT word(s) + ${ptc} ç vs ${enw} EN word(s), ${vnw} VN word(s)` });
 
   if((vnw >= 1 || vnLetters >= 2) && vnScore > enScore) return out({ lang:"vi", why });
   if(enw >= 1 && enScore >= vnScore)                    return out({ lang:"en", why });
@@ -1244,7 +1264,8 @@ const CAPTION_SLACK = 5;
 const LANG_SLACK = 5;
 /* the words of the other language actually counted, so the allowance is measured, not guessed */
 const offLangWords = d => (d && d.lang === "en" ? (d.enw || 0)
-                        : d && d.lang === "vi" ? (d.vnw || 0) : 0);
+                        : d && d.lang === "vi" ? (d.vnw || 0)
+                        : d && d.lang === "pt" ? (d.ptw || 0) : 0);
 const langFlagged = d => offLangWords(d) > LANG_SLACK;
 
 /* The one thing that separates two otherwise-identical templated posts is the fixture they name —
@@ -1995,9 +2016,17 @@ function chanLabel(s){
   return seg || pretty(u) || "(no handle)";
 }
 
-function dcChannels(o){
-  return o.socials.map(s => ({
-    id:s.id, platform:s.platform, lang:normLang(s.note),
+/* A region is a set of channels that share ONE schedule of drops. Vietnam and English post the same
+   drops in two languages; Brazil keeps its own. The report is drawn one region at a time — measured
+   against each other's drops, every channel of the other region would read as missing — while a
+   press still reads every channel of every region. */
+const REGIONS = [["main", "Vietnam & English"], ["br", "Brazil"]];
+const regionOf = s => s.region || "main";
+const regionSel = () => (REGIONS.some(r => r[0] === checks.region) ? checks.region : "main");
+
+function dcChannels(o, region){
+  return o.socials.filter(s => !region || regionOf(s) === region).map(s => ({
+    id:s.id, platform:s.platform, lang:normLang(s.note), region:regionOf(s),
     name:platform(s.platform).name + " · " + chanLabel(s),
     url:safeUrl(s.url), handle:s.handle || "",
     /* the pinned id wins; a run-resolved one is only there for a channel without one */
@@ -2333,7 +2362,8 @@ function chanLabelFromUrl(u){
 }
 
 /* ── report UI ──────────────────────────────────────────────────────────── */
-const TZS = [[0, "UTC"], [7, "UTC+7 · Vietnam / Thailand"], [8, "UTC+8 · China"], [5.5, "UTC+5:30 · India"]];
+const TZS = [[0, "UTC"], [7, "UTC+7 · Vietnam / Thailand"], [8, "UTC+8 · China"], [5.5, "UTC+5:30 · India"],
+             [-3, "UTC−3 · Brazil"]];
 /* Calendar days first, because "how many went out today" is the question actually being asked and
    a rolling 24 h cannot answer it — at midday it straddles two dates. The rolling spans stay for
    looking across a boundary. */
@@ -2539,7 +2569,8 @@ let dcRedraw = null;
 
 function dailyCheckModal(o){
   const draw = () => {
-    const chans = dcChannels(o);
+    /* the region on screen — collection always reads every region (collectServer) */
+    const chans = dcChannels(o, regionSel());
     const wo = windowOpt();
     const rep = reconcile(chans, { tz:checks.tz, win:checks.win, maxPerPeriod:checks.maxPer || 4, ...wo });
     const nameOf = id => (chans.find(c => c.id === id) || {}).name || id;
@@ -2623,7 +2654,7 @@ function dailyCheckModal(o){
                 ? `extension is v${esc(extVersion)} but this build needs v${esc(EXT_WANT)} — reload it at chrome://extensions`
                 : "everything server-side · extension standing by as fallback")
             : apifyInfo && apifyInfo.configured === false && brwIds.length
-              ? `Apify not configured and no extension — only ${esc(platNames(srvIds) || "the free channels")} can be read`
+              ? "Apify not configured — Facebook, Instagram and TikTok are read free; X (and any free read that fails) needs Apify or the extension"
               : "everything server-side, one press"}</span>
           <span class="sp"></span>
           ${pendingN ? `<button class="b s" id="dcMerge"><i data-lucide="download"></i> Merge ${pendingN} waiting</button>` : ""}
@@ -2944,7 +2975,7 @@ function dailyCheckModal(o){
       const q = rep.slots[si].posts.find(q => q.channelId !== p.channelId && capOf(q) && chanOf(q.channelId).lang === c.lang);
       return q ? { text:capOf(q), from:chanOf(q.channelId).name || q.channelId } : null;
     };
-    const LANG_NAME = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese" };
+    const LANG_NAME = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese", pt:"Portuguese" };
 
     const cPlats = [...new Set(logPosts.map(p => chanOf(p.channelId).platform).filter(Boolean))];
     const cLangs = [...new Set(logPosts.map(p => chanOf(p.channelId).lang).filter(Boolean))];
@@ -3125,6 +3156,11 @@ function dailyCheckModal(o){
       <div class="mb">
         <div class="dc-top">
           <div class="dc-bar">
+            <label class="dc-fld"><span>Region</span>
+              <select id="dcRegion" title="Which region's channels to report on — each keeps its own schedule of drops">
+                ${REGIONS.map(([v, l]) => `<option value="${v}"${regionSel() === v ? " selected" : ""}>${esc(l)} · ${
+                  o.socials.filter(s => regionOf(s) === v).length}</option>`).join("")}
+              </select></label>
             <label class="dc-fld"><span>Window</span>
               <select id="dcWindow" title="Which stretch of time to report on">
                 ${WINDOWS.map(([v, l]) => `<option value="${v}"${String(checks.window || "today") === v ? " selected" : ""}>${esc(l)}</option>`).join("")}
@@ -3195,6 +3231,7 @@ function dailyCheckModal(o){
         checks[key] = num ? Number(e.target.value) : e.target.value; saveChecks(); draw(); }; };
     set("#dcWindow", "window"); set("#dcDate", "date");
     set("#dcTz", "tz", true); set("#dcWin", "win", true); set("#dcMax", "maxPer", true);
+    set("#dcRegion", "region", false);
 
     mo.querySelectorAll("input.cnt").forEach(inp => {
       inp.onchange = () => {
@@ -3386,8 +3423,8 @@ function render(){
   /* channels grouped by language — the same pairing the report uses (VN drop ↔ EN drop) */
   const groups = {};
   for(const c of o.socials){ const lg = normLang(c.note) || "other"; (groups[lg] = groups[lg] || []).push(c); }
-  const LG = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese", other:"Other" };
-  const ORDER = ["vi","en","th","zh","other"];
+  const LG = { vi:"Vietnamese", en:"English", th:"Thai", zh:"Chinese", pt:"Portuguese · Brazil", other:"Other" };
+  const ORDER = ["vi","en","pt","th","zh","other"];
   const langs = Object.keys(groups).sort((a,b) => ORDER.indexOf(a) - ORDER.indexOf(b));
 
   const chanCard = c => {
