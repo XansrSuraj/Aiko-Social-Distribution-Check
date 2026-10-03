@@ -1277,7 +1277,10 @@ function differentFixture(a, b){
    YouTube or TikTok, under the same covered-stretch rules; read any other way it stays on content.
    The assumption this rests on: SportsFC publishes to Facebook as reels. A photo post would not be
    on the Reels tab, and its drop would read as missing there. */
-const fbByTime = c => { const m = (checks.meta || {})[c.id]; return !!(m && m.ok !== false && m.source === "facebook-reels"); };
+/* The free reader of the page's own Reels tab ("facebook-free", 2026-10-03) brings the same complete,
+   newest-first list with exact times — and captions too — so it is matched on time as well. */
+const fbByTime = c => { const m = (checks.meta || {})[c.id];
+  return !!(m && m.ok !== false && (m.source === "facebook-reels" || m.source === "facebook-free")); };
 const matchesByContent = c => c.platform === "facebook" && !fbByTime(c);
 /* Viber reaches us only as forwarded phone notifications: real per-post timestamps, but coverage
    of the window that cannot be depended on (a killed listener, a collapsed "3 new messages"
@@ -2544,7 +2547,8 @@ function dailyCheckModal(o){
 
     /* ── which sources have reported, and is anything waiting ──
        Server · free: what api/collect reads at no cost (YouTube, Telegram, Viber's push, the bot).
-       Server · Apify: what it reads through paid Apify runs, with the extension as the fallback.
+       Server · social: Facebook, Instagram, TikTok, X — read free from each platform's public page
+       where that works, through paid Apify runs where it does not, the extension last.
        Platform names for the two rows below are derived from whichever channels are actually
        present, rather than spelled out — so the next platform added to either side never has to
        be found and edited in here by hand. */
@@ -2590,6 +2594,11 @@ function dailyCheckModal(o){
     const money = n => "$" + (n < 0.1 ? n.toFixed(4) : n.toFixed(2));
     const apifyNote = (() => {
       const bits = [];
+      /* which reader actually answered each of these channels on the last press */
+      const srcOf = id => String(((checks.meta || {})[id] || {}).source || "");
+      const nFree = brwIds.filter(id => /-free$/.test(srcOf(id))).length;
+      const nApify = brwIds.filter(id => /-apify$|-reels$/.test(srcOf(id))).length;
+      if(nFree || nApify) bits.push(`${nFree} free · ${nApify} via Apify`);
       const last = checks.apifyLast;
       if(last) bits.push(last.runs ? (last.settled === false ? `last press ≥ ${money(last.usd)} (Apify still settling the bill)`
                                                              : `last press ${money(last.usd)}`)
@@ -2635,7 +2644,7 @@ function dailyCheckModal(o){
           ).join("")}</div>`;
         })()}
         ${srcRow("Server · free", platNames(srvIds), gotFrom(srvIds), srvIds.length, "")}
-        ${srcRow("Server · Apify", platNames(brwIds), gotFrom(brwIds), brwIds.length,
+        ${srcRow("Server · social", platNames(brwIds), gotFrom(brwIds), brwIds.length,
           apifyNote ? `<span class="dc-sn" style="opacity:.75">${esc(apifyNote)}</span>` : "")}
       </div>`;
 

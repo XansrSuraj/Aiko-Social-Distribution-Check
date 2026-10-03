@@ -1192,14 +1192,179 @@ function igParseApify(items, name) {
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
+/* ═══════════════════ the free readers (no Apify, no browser, no login) ═══════════════════
+   Facebook, Instagram and TikTok each serve one page that is public by design — a page's Reels tab,
+   and the feed WIDGETS other websites embed — with the recent posts embedded as JSON: exact time,
+   caption, id, cover image. Measured 2026-10-02/03 from a datacenter IP (GitHub Actions) and a home
+   connection: 5 of 5 rounds matched Apify's posts to the minute, captions and all (the full record is
+   in the free-scraper-lab repo branch). They are read first; Apify is only the fallback.
+
+   They are undocumented, so any of them can change without warning. A free read is therefore only
+   believed when it looks right (freeCheck) — otherwise the channel falls through to Apify, so a
+   platform changing a page costs a few cents for that channel, never a blank or a false report.
+   FREE_READERS=off in the environment turns them all off at once. */
+const FREE_HEADERS = {
+  /* Facebook answers 400 to a request without a browser's Sec-Fetch / client-hint headers and the
+     full page with them; Instagram picks which page to serve by them too */
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1",
+  "Upgrade-Insecure-Requests": "1",
+  "sec-ch-ua": '"Chromium";v="140", "Google Chrome";v="140", "Not;A=Brand";v="99"',
+  "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+};
+const freeOn = () => String(process.env.FREE_READERS || "").toLowerCase() !== "off";
+/* a channel that posts every day: a newest post older than this means the page did not give us the
+   recent ones, not that nothing was posted — read it through Apify instead */
+const FREE_MAX_AGE_DAYS = 4;
+
+function freeCheck(posts) {
+  if (!posts.length) return "no posts found on the page";
+  if (posts.some(p => !isFinite(new Date(p.ts).getTime()))) return "a post without a usable time";
+  const newest = Math.max(...posts.map(p => new Date(p.ts).getTime()));
+  if (Date.now() - newest > FREE_MAX_AGE_DAYS * 86400e3) return `newest post is older than ${FREE_MAX_AGE_DAYS} days`;
+  if (newest > Date.now() + 3600e3) return "a post dated in the future";
+  return "";
+}
+
+/* every JSON blob the page embeds in <script type="application/json"> */
+function jsonScripts(html) {
+  const out = [];
+  for (const m of String(html).matchAll(/<script[^>]*type="application\/(?:ld\+)?json"[^>]*>([\s\S]*?)<\/script>/g)) {
+    try { out.push(JSON.parse(m[1])); } catch (e) { /* not every script is clean JSON */ }
+  }
+  return out;
+}
+function walkJson(v, visit, depth) {
+  if (!v || typeof v !== "object" || (depth || 0) > 60) return;
+  visit(v);
+  if (Array.isArray(v)) { for (const x of v) walkJson(x, visit, (depth || 0) + 1); return; }
+  for (const k in v) walkJson(v[k], visit, (depth || 0) + 1);
+}
+async function freePage(url) {
+  const r = await get(url, FREE_HEADERS);
+  if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+  return r.body;
+}
+
+/* Facebook: facebook.com/<page>/reels/ — each post is a "Story" object with post_id, creation_time,
+   message.text, and the reel under short_form_video_context (link, cover, length, plays). */
+function fbParseFree(html) {
+  const byId = new Map();
+  for (const b of jsonScripts(html)) walkJson(b, o => {
+    if (typeof o.creation_time !== "number" || !o.post_id || byId.has(String(o.post_id))) return;
+    const sv = o.short_form_video_context || {};
+    const pv = sv.playback_video || {};
+    const v = sv.video || {};
+    const text = String((o.message && o.message.text) || "");
+    const tags = ((o.message && o.message.ranges) || []).map(r => r && r.entity && r.entity.__typename === "Hashtag" ? r.entity.name : "").filter(Boolean);
+    byId.set(String(o.post_id), {
+      externalId: String(o.post_id), ts: new Date(o.creation_time * 1000).toISOString(),
+      kind: sv.video || sv.playback_video ? "reel" : "post", text,
+      permalink: sv.shareable_url || (sv.if_should_change_url_for_reels || {}).shareable_url || "",
+      views: num(sv.play_count_reduced),
+      duration: v.playable_duration_in_ms ? Math.round(v.playable_duration_in_ms / 1000)
+              : pv.length_in_second ? Math.round(pv.length_in_second) : null,
+      thumb: (pv.thumbnailImage && pv.thumbnailImage.uri) || v.first_frame_thumbnail || "",
+      hashtags: tagList(tags), link: firstLink(text),
+      author: ((o.actors || [])[0] || {}).name || "", w: num(pv.width), h: num(pv.height),
+    });
+  });
+  return [...byId.values()].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
+/* Instagram: instagram.com/<user>/embed/ — the feed widget; its posts sit in a JSON string
+   ("contextJSON") with shortcode, taken_at_timestamp, caption, display_url and counts. An 18+ or
+   private account serves the widget with no posts, which freeCheck turns into an Apify fallback. */
+function igParseFree(html, name) {
+  const me = name.toLowerCase();
+  const posts = [], seen = new Set();
+  const m = String(html).match(/"contextJSON":"((?:[^"\\]|\\.)*)"/);
+  let ctx = null;
+  try { ctx = m ? JSON.parse(JSON.parse('"' + m[1] + '"')) : null; } catch (e) { ctx = null; }
+  walkJson(ctx, o => {
+    if (!o.shortcode || !o.taken_at_timestamp || seen.has(o.shortcode)) return;
+    const owner = (o.owner && o.owner.username) || "";
+    if (owner && owner.toLowerCase() !== me) return;
+    seen.add(o.shortcode);
+    const cap = (((o.edge_media_to_caption || {}).edges || [])[0] || {}).node;
+    const text = String((cap && cap.text) || "");
+    posts.push({
+      externalId: o.shortcode, ts: new Date(o.taken_at_timestamp * 1000).toISOString(),
+      kind: o.__typename === "GraphSidecar" ? "carousel" : o.is_video ? "reel" : "image",
+      text, permalink: "https://www.instagram.com/p/" + o.shortcode + "/",
+      likes: o.like_and_view_counts_disabled ? null : num((o.edge_liked_by || {}).count),
+      comments: num((o.edge_media_to_comment || {}).count),
+      thumb: o.display_url || "", link: firstLink(text),
+      w: num((o.dimensions || {}).width), h: num((o.dimensions || {}).height),
+    });
+  });
+  return posts.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
+/* TikTok: tiktok.com/embed/@<user> — the creator widget. Its state (__FRONTITY_CONNECT_STATE__)
+   lists the newest videos with id, desc, coverUrl and playCount; a TikTok video id carries its own
+   creation time in its top 32 bits (checked against Apify: within seconds). */
+const ttIdTime = id => { try { return new Date(Number(BigInt(id) >> 32n) * 1000).toISOString(); } catch (e) { return ""; } };
+function ttParseFree(html, name) {
+  const me = name.toLowerCase();
+  const byId = new Map();
+  for (const b of jsonScripts(html)) walkJson(b, o => {
+    if (!o.id || typeof o.desc !== "string" || !/^\d{15,25}$/.test(String(o.id))) return;
+    if (o.authorUniqueId && String(o.authorUniqueId).toLowerCase() !== me) return;
+    if (o.privateItem) return;
+    byId.set(String(o.id), o);
+  });
+  /* the widget's own links, in case its state moves — dated by id, without a caption */
+  const re = new RegExp("/@" + me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "/video/(\\d{15,25})", "gi");
+  for (const m of String(html).matchAll(re)) if (!byId.has(m[1])) byId.set(m[1], { id: m[1], desc: "" });
+  return [...byId.values()].map(o => ({
+    externalId: String(o.id), ts: ttIdTime(String(o.id)), kind: "video", text: String(o.desc || ""),
+    permalink: "https://www.tiktok.com/@" + name + "/video/" + o.id,
+    views: num(o.playCount), thumb: o.coverUrl || o.originCoverUrl || "",
+    link: firstLink(o.desc), w: num(o.width), h: num(o.height),
+  })).filter(p => p.ts).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+}
+
+/* Free first; Apify only when the free read failed or looked wrong. The reason rides along in the
+   note either way, so a free route that has stopped working shows up in the report. */
+async function freeThenApify(platform, url, parse, apify) {
+  let why = "turned off (FREE_READERS=off)";
+  if (freeOn()) {
+    try {
+      const posts = parse(await freePage(url));
+      why = freeCheck(posts);
+      if (!why) return { posts, source: platform + "-free", cost: null,
+                         note: "read free from the platform's public page — no Apify" };
+    } catch (e) { why = String(e.message || e); }
+  }
+  if (!process.env.APIFY_TOKEN) throw new Error(`free read failed (${why}) and APIFY_TOKEN is not set`);
+  try {
+    const out = await apify();
+    out.note = (out.note || "") + ` · free read failed first: ${why}`;
+    return out;
+  } catch (e) {
+    e.message = String(e.message || e) + ` · free read failed first: ${why}`;
+    throw e;
+  }
+}
+
 async function collectInstagram(ch) {
   const name = igTarget(ch);
   if (!name) throw new Error("No Instagram username could be read from this channel");
 
-  if (process.env.APIFY_TOKEN) {
-    return apifyRead("instagram", "ig:" + name.toLowerCase(), {
-      username: [name], resultsLimit: APIFY_MAX_POSTS, skipPinnedPosts: true, dataDetailLevel: "basicData",
-    }, items => igParseApify(items, name), "@" + name);
+  if (process.env.APIFY_TOKEN || freeOn()) {
+    try {
+      return await freeThenApify("instagram", "https://www.instagram.com/" + encodeURIComponent(name) + "/embed/",
+        html => igParseFree(html, name),
+        () => apifyRead("instagram", "ig:" + name.toLowerCase(), {
+          username: [name], resultsLimit: APIFY_MAX_POSTS, skipPinnedPosts: true, dataDetailLevel: "basicData",
+        }, items => igParseApify(items, name), "@" + name));
+    } catch (e) {
+      if (process.env.APIFY_TOKEN) throw e;          // Apify was tried too — nothing more to try
+      /* no token: the public endpoint below is the last thing left */
+    }
   }
 
   /* Without a token: Instagram's own public profile endpoint. It answers a home IP but usually
@@ -1297,16 +1462,15 @@ function fbParseApify(items) {
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
-/* Facebook has no public post list a server can read — mbasic is gone and /posts sits behind a
-   login wall — so without APIFY_TOKEN the dispatcher below never calls this; it reports the channel
-   as one for the extension instead. */
+/* The page's own Reels tab first (free, with captions); Apify's Reels scraper as the fallback. */
 async function collectFacebook(ch) {
   const pageUrl = fbTarget(ch);
   if (!pageUrl) throw new Error("No Facebook page URL could be read from this channel");
-  if (!process.env.APIFY_TOKEN) throw new Error("Facebook needs APIFY_TOKEN to be read server-side.");
-  return apifyRead("facebook", "fbr:" + pageUrl.toLowerCase(), {
-    startUrls: [{ url: pageUrl }], resultsLimit: APIFY_MAX_POSTS,
-  }, fbParseApify, pageUrl.replace(/^https?:\/\/(www\.)?/, ""));
+  const reels = pageUrl.replace(/^https?:\/\/(www\.)?facebook\.com/i, "https://www.facebook.com") + "/reels/";
+  return freeThenApify("facebook", reels, fbParseFree,
+    () => apifyRead("facebook", "fbr:" + pageUrl.toLowerCase(), {
+      startUrls: [{ url: pageUrl }], resultsLimit: APIFY_MAX_POSTS,
+    }, fbParseApify, pageUrl.replace(/^https?:\/\/(www\.)?/, "")));
 }
 
 /* ═══════════════════ tiktok ═══════════════════ */
@@ -1343,19 +1507,19 @@ function ttParseApify(items, name) {
   }).filter(Boolean).sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
-/* TikTok refuses server requests outright and has no free public feed: Apify is the only server
-   route. Without a token it is reported as unknown, never as empty. */
+/* TikTok's profile page is served to a server with empty post lists, but its creator widget is not:
+   that first (free), Apify as the fallback. */
 async function collectTiktok(ch) {
   const name = ttTarget(ch);
   if (!name) throw new Error("No TikTok username could be read from this channel");
-  if (!process.env.APIFY_TOKEN) throw new Error("TikTok needs APIFY_TOKEN to be read server-side.");
-  return apifyRead("tiktok", "tt:" + name.toLowerCase(), {
+  return freeThenApify("tiktok", "https://www.tiktok.com/embed/@" + encodeURIComponent(name),
+    html => ttParseFree(html, name), () => apifyRead("tiktok", "tt:" + name.toLowerCase(), {
     profiles: [name], resultsPerPage: APIFY_MAX_POSTS, profileScrapeSections: ["videos"],
     profileSorting: "latest", excludePinnedPosts: true,
     shouldDownloadVideos: false, shouldDownloadCovers: false, shouldDownloadSlideshowImages: false,
     shouldDownloadAvatars: false, shouldDownloadMusicCovers: false,
     downloadSubtitlesOptions: "NEVER_DOWNLOAD_SUBTITLES", proxyCountryCode: "None",
-  }, items => ttParseApify(items, name), "@" + name);
+  }, items => ttParseApify(items, name), "@" + name));
 }
 
 /* ═══════════════════ telegram bot (1:1 DMs, via a user session) ═══════════════════ */
@@ -1441,12 +1605,11 @@ async function collectViber(ch) {
 
 /* ═══════════════════ dispatch ═══════════════════ */
 
-/* Without APIFY_TOKEN there is no server route at all for Facebook or TikTok, so they are handed to
-   the browser extension up front instead of being reported as failures. Instagram still tries its
-   public endpoint and X its free page read first — both can answer from some networks. */
+/* Platforms with no server route at all once the free readers are switched off and no Apify token
+   is set: handed to the browser extension up front instead of being reported as failures. */
 const NEEDS_APIFY = {
-  facebook: "Facebook has no public post list a server can read — set APIFY_TOKEN, or collect it with the browser extension.",
-  tiktok: "TikTok refuses server requests — set APIFY_TOKEN, or collect it with the browser extension.",
+  facebook: "Facebook's free read is switched off and APIFY_TOKEN is not set — collect it with the browser extension.",
+  tiktok: "TikTok's free read is switched off and APIFY_TOKEN is not set — collect it with the browser extension.",
 };
 
 /* platform:handle, lowercased — the same first-path-segment handle every collector above already
@@ -1499,7 +1662,7 @@ async function collectOne(ch, cutoff, pushedAll) {
     }
   } catch (err) { /* an unreachable store must never take a readable channel down with it */ }
 
-  if (NEEDS_APIFY[ch.platform] && !process.env.APIFY_TOKEN) {
+  if (NEEDS_APIFY[ch.platform] && !process.env.APIFY_TOKEN && !freeOn()) {
     return { ...base, source: "browser-required", browserRequired: true, note: NEEDS_APIFY[ch.platform] };
   }
 

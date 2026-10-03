@@ -378,14 +378,22 @@ const X  = { id: "x",  platform: "x", url: "https://x.com/Sportsfcvn" };
     await wipeCache();
   }
 
-  console.log("\n── without a token, Facebook and TikTok go to the extension (never a false empty)");
+  console.log("\n── without a token, a failed free read is an honest failure — and with the free readers off, the extension");
   {
     for (const ch of [FB, TT]) {
       const { res, calls } = await collect([ch], {}, { token: null });
-      check(res.ok === false && res.browserRequired === true && res.source === "browser-required" && res.posts.length === 0,
-        ch.platform + " → browser-required, not a failure and not an empty success", res.note.slice(0, 70));
+      check(res.ok === false && res.posts.length === 0 && /free read failed/.test(res.note) && /APIFY_TOKEN/.test(res.note),
+        ch.platform + ": free read tried first, its failure named, never a false empty", res.note.slice(0, 90));
       check(!calls.some(c => /api\.apify\.com/.test(c.url)), ch.platform + ": Apify is never called without a token");
     }
+    process.env.FREE_READERS = "off";
+    for (const ch of [FB, TT]) {
+      const { res, calls } = await collect([ch], {}, { token: null });
+      check(res.ok === false && res.browserRequired === true && res.source === "browser-required",
+        ch.platform + ": free readers off and no token → handed to the extension", res.note.slice(0, 70));
+      check(calls.length === 0, ch.platform + ": nothing is fetched at all", String(calls.length));
+    }
+    delete process.env.FREE_READERS;
   }
 
   console.log(`\n  ${pass} passed, ${fail} failed`);

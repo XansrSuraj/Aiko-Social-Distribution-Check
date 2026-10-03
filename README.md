@@ -192,14 +192,27 @@ Four things get flagged:
 |---|---|---|
 | YouTube | the official Data API, or the channel page if no key is set | a free `YOUTUBE_API_KEY` (the page read is refused from Vercel) |
 | Telegram | `t.me/s/<channel>`, the public preview | nothing |
-| Facebook | Apify `apify/facebook-reels-scraper` — the page's Reels tab | `APIFY_TOKEN` |
-| Instagram | Apify `apify/instagram-post-scraper` | `APIFY_TOKEN` |
-| TikTok | Apify `clockworks/tiktok-scraper` | `APIFY_TOKEN` |
+| Facebook | **free**: the page's own Reels tab (`/reels/`) — Apify Reels scraper as fallback | nothing (`APIFY_TOKEN` for the fallback) |
+| Instagram | **free**: the profile's embed widget (`/embed/`) — Apify as fallback | nothing (`APIFY_TOKEN` for the fallback) |
+| TikTok | **free**: TikTok's creator embed widget (`/embed/@user`) — Apify as fallback | nothing (`APIFY_TOKEN` for the fallback) |
 | X (Twitter) | Apify `xquik/x-tweet-scraper`, then twitterapi.io, then the free profile page | `APIFY_TOKEN` |
 | Telegram bot | a Telegram user session reading the bot's DMs | `TG_API_ID` / `TG_API_HASH` / `TG_SESSION` |
 | Viber | pushed in to `/api/ingest` by whatever publishes to it | a sender — see below |
 
-### Facebook, Instagram, TikTok and X are read through Apify
+### Free first (since 2026-10-03), Apify as the fallback
+
+Facebook, Instagram and TikTok each serve one page that is public by design — a page's Reels tab,
+and the feed widgets other websites embed — with the recent posts embedded as JSON: exact time,
+caption, id, cover image. `api/collect.js` reads those first, with a plain `fetch()` (no browser,
+no login, no Apify). Tested from a datacenter and a home connection: 5 of 5 rounds matched Apify's
+posts to the minute. A free read is only believed when it looks right (posts found, real times,
+newest within 4 days); otherwise that channel falls through to Apify, so a platform changing its page
+costs a few cents for that channel, never a blank report. `FREE_READERS=off` switches them off.
+X has no such page and stays on Apify (~$0.001 a check); Instagram `sportsfc.fans` (18+ restricted)
+falls back to Apify and the extension. The full experiment is in the `free-scraper-lab` branch of
+the backup repo.
+
+### Apify (fallback, and X)
 
 All four refuse requests from a server's IP (Instagram answers a datacenter IP with HTTP 429 in about
 25 ms, X serves an empty page, TikTok a profile with no videos, Facebook a login wall). Free routes —
