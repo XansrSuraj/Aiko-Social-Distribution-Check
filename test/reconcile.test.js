@@ -47,7 +47,7 @@ const boot = `
 `;
 const M = new Function("ST", boot + src +
   "\n;return { reconcile, detectLang, clusterSlots, mergeLate, sigScore, normLang, chanLabel," +
-  " contentScore, capWords, captionOverlap, checks:()=>checks };")(ST);
+  " contentScore, capWords, captionOverlap, mergeReports, checks:()=>checks };")(ST);
 
 let pass = 0, fail = 0;
 const ok = (good, label, extra) => {
@@ -872,6 +872,37 @@ ok(phantom.rows.find(r => r.id === "fbv").cells[0].state === "okc",
 ok(phantom.slots[0].present.indexOf("fbv") !== -1,
   "and the drop still counts it among the channels it reached",
   phantom.slots[0].present.join(","));
+
+/* ── all regions on one screen ─────────────────────────────────────────────
+   Brazil keeps its own schedule. Each region is reconciled on its own and the two are laid side by
+   side: a channel is never marked missing for another region's drop. */
+console.log("\n── all regions merged: each judged only on its own drops");
+{
+  const MAIN = [{ id: "ytv", platform: "youtube", name: "YouTube · vn", lang: "vi", region: "main" },
+                { id: "tgv", platform: "telegram", name: "Telegram · vn", lang: "vi", region: "main" }];
+  const BR = [{ id: "ytb", platform: "youtube", name: "YouTube · br", lang: "pt", region: "br" },
+              { id: "igb", platform: "instagram", name: "Instagram · br", lang: "pt", region: "br" }];
+  const PTX = "Espanha vai impor seu ritmo e buscar a vitória contra a República Tcheca?";
+  const c = M.checks();
+  c.posts = { ytv: [P("v1", 60, VN_TEXT), P("v2", 400, VN_TEXT)], tgv: [P("t1", 61, VN_TEXT), P("t2", 401, VN_TEXT)],
+              ytb: [P("b1", 200, PTX)], igb: [P("i1", 201, PTX)] };
+  c.counts = {}; c.meta = {}; c.captions = {}; c.confirms = {};
+  Object.assign(c, { tz: 7, win: 15, maxPer: 4 });
+  const opt = { tz: 7, win: 15, mode: "roll", hours: 24, maxPerPeriod: 4 };
+  const rep = M.mergeReports([{ region: "main", name: "Vietnam & English", rep: M.reconcile(MAIN, opt) },
+                              { region: "br", name: "Brazil", rep: M.reconcile(BR, opt) }]);
+  ok(rep.slots.length === 3 && rep.slots.map(s => s.region).join(",") === "main,br,main",
+    "three drops in time order, each tagged with its region", rep.slots.map(s => s.region).join(","));
+  const row = id => rep.rows.find(r => r.id === id);
+  ok(row("ytb").cells.map(x => x.state).join("/") === "na/ok/na" && row("ytv").cells.map(x => x.state).join("/") === "ok/na/ok",
+    "a channel shows 'na' under the other region's drops and ✓ under its own",
+    row("ytb").cells.map(x => x.state).join("/") + " | " + row("ytv").cells.map(x => x.state).join("/"));
+  ok(!rep.rows.some(r => r.cells.some(x => x.state === "miss")) && !rep.alerts.some(a => a.kind === "missing"),
+    "nobody is marked missing for another region's drop");
+  ok(rep.slots.every(s => s.cov === 2) && rep.rows.every(r => r.status === "ok"),
+    "each drop counts only its own region's channels (2), every row is complete", rep.slots.map(s => s.cov).join(","));
+  ok(rep.regions.length === 2 && rep.langs.includes("pt") && rep.langs.includes("vi"), "both regions and their languages are in the report");
+}
 
 /* ── Facebook read from its Reels tab ──────────────────────────────────────
    The Reels-tab reader (source "facebook-reels") lists a page's reels newest first with exact

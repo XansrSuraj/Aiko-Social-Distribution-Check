@@ -371,6 +371,7 @@ td.ask .cl.none{border-style:dashed;border-color:color-mix(in srgb,var(--a1) 45%
    have no data for this channel" read as "nothing was posted" — the one confusion this report
    exists to prevent. An outlined empty box reads as a cell nobody could fill. */
 .cl.none{color:var(--tx3);background:none;border:1px dashed var(--ln);font-size:11px}
+.cl.na{color:var(--tx3);background:none;border:0;opacity:.45}
 /* full sentences lived under a bare unlabelled header and set the table's width from the far
    right, pushing the drop columns the report is actually read for off-screen */
 table.dc.mx th.whyc,table.dc.mx td.mt{max-width:190px;white-space:normal;line-height:1.4}
@@ -2000,6 +2001,37 @@ function reconcile(channels, opt){
           notarget:rows.filter(r => r.status === "notarget").length,
           unknown:rows.filter(r => r.status === "unknown").length } };
 }
+
+/* ── all regions on one screen ───────────────────────────────────────────────
+   Each region keeps its own schedule of drops, so each is reconciled ON ITS OWN — Brazil is never
+   measured against a Vietnam-only drop, nor Vietnam against a Brazil-only one. The results are then
+   laid side by side in one report: every drop of every region as a column, in time order, and a
+   channel's cell under another region's drop is "na" — not its drop, never counted for or against
+   it. Each drop also carries how many channels of ITS region could have had it (cov), so its
+   "3/3" counts only those. */
+function mergeReports(parts){
+  parts = parts.filter(p => p && p.rep && p.rep.rows.length);
+  if(parts.length === 1) return parts[0].rep;
+  const slots = [];
+  for(const p of parts){
+    const cov = p.rep.rows.filter(r => r.mode !== "none").length;
+    p.rep.slots.forEach((s, i) => slots.push({ ...s, region:p.region, regionName:p.name, cov, _i:i }));
+  }
+  slots.sort((a, b) => new Date(a.at) - new Date(b.at));
+  const rows = [];
+  for(const p of parts) for(const r of p.rep.rows) rows.push({ ...r, region:p.region,
+    cells:slots.map(s => s.region === p.region ? r.cells[s._i] : { state:"na", post:null }) });
+  const langs = [...new Set(parts.flatMap(p => p.rep.langs))];
+  const order = { verify:0, dead:1, lang:2, missing:3, over:4, late:5, maybe:6 };
+  const alerts = parts.flatMap(p => p.rep.alerts).sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+  const first = parts[0].rep;
+  const sum = {};
+  for(const p of parts) for(const [k, v] of Object.entries(p.rep.sum)) sum[k] = (sum[k] || 0) + v;
+  return { ...first, slots, rows, langs, alerts, sum,
+    /* one number cannot describe two schedules: null only when no region measured anything */
+    expected:parts.every(p => p.rep.expected === null) ? null : parts.map(p => p.rep.expected).find(x => x !== null),
+    regions:parts.map(p => ({ id:p.region, name:p.name, expected:p.rep.expected })) };
+}
 /* ── collection ─────────────────────────────────────────────────────────── */
 
 /* The report is useless without this. An org with four Facebook Pages and two Telegram channels
@@ -2022,7 +2054,8 @@ function chanLabel(s){
    press still reads every channel of every region. */
 const REGIONS = [["main", "Vietnam & English"], ["br", "Brazil"]];
 const regionOf = s => s.region || "main";
-const regionSel = () => (REGIONS.some(r => r[0] === checks.region) ? checks.region : "main");
+/* which region is on screen — "all" (the default) draws every region at once, each judged on its own */
+const regionSel = () => (REGIONS.some(r => r[0] === checks.regionView) ? checks.regionView : "all");
 
 function dcChannels(o, region){
   return o.socials.filter(s => !region || regionOf(s) === region).map(s => ({
@@ -2415,6 +2448,8 @@ const CELL = {
      looked here, so it has nothing to say, and saying "missing" would be inventing a fact. The
      next run judges it normally. */
   unseen:{ g:"·", cls:"none", t:"outside what this channel's read covered — not judged, and not counted against it" },
+  /* the all-regions view: a drop of ANOTHER region — this channel keeps its own schedule */
+  na:{ g:"–", cls:"na", t:"another region's drop — this channel keeps its own schedule, so it is not judged here" },
 };
 const TABS = [["sum", "Summary"], ["drops", "What went out"], ["content", "Content"], ["log", "Post log"], ["chan", "Per channel"]];
 let dcTab = "sum";
@@ -2569,10 +2604,18 @@ let dcRedraw = null;
 
 function dailyCheckModal(o){
   const draw = () => {
-    /* the region on screen — collection always reads every region (collectServer) */
-    const chans = dcChannels(o, regionSel());
+    /* the region on screen — collection always reads every region (collectServer). "all" reconciles
+       each region on its own schedule and lays them side by side (mergeReports). */
+    const view = regionSel();
+    const chans = dcChannels(o, view === "all" ? undefined : view);
     const wo = windowOpt();
-    const rep = reconcile(chans, { tz:checks.tz, win:checks.win, maxPerPeriod:checks.maxPer || 4, ...wo });
+    const ropt = { tz:checks.tz, win:checks.win, maxPerPeriod:checks.maxPer || 4, ...wo };
+    const rep = view === "all"
+      ? mergeReports(REGIONS.map(([id, name]) => {
+          const cs = dcChannels(o, id);
+          return cs.length ? { region:id, name, rep:reconcile(cs, ropt) } : null;
+        }))
+      : reconcile(chans, ropt);
     const nameOf = id => (chans.find(c => c.id === id) || {}).name || id;
     const chanOf = id => chans.find(c => c.id === id) || {};
 
@@ -2695,7 +2738,10 @@ function dailyCheckModal(o){
              <div class="dc-sub">Press <b>Run everything</b> — the server reads ${esc(platNames(srvIds) || "the free channels")}${
                brwIds.length ? " free and " + esc(platNames(brwIds)) + " through Apify" : ""}, all in one go.</div></div></div>`
         : `<div class="dc-head good"><i data-lucide="check-check"></i><div>
-             <b>All clear — every collected channel got all ${rep.expected} post${rep.expected === 1 ? "" : "s"}</b>
+             <b>All clear — ${rep.regions
+               ? "every collected channel got all its posts (" + rep.regions.filter(g => g.expected !== null)
+                   .map(g => esc(g.name) + ": " + g.expected).join(" · ") + ")"
+               : "every collected channel got all " + rep.expected + " post" + (rep.expected === 1 ? "" : "s")}</b>
              ${rep.sum.unknown ? `<div class="dc-sub">${rep.sum.unknown} channel(s) still have no data.</div>` : ""}</div></div>`;
 
     /* ── tab: summary matrix ── */
@@ -2705,10 +2751,12 @@ function dailyCheckModal(o){
     const mxHead = `<tr><th class="stick">Channel</th>
       ${rep.slots.map(s => {
         const got = s.present.length;
-        return `<th class="ctr" title="${esc(fmtWhen(s.at, rep.tz))}">${esc(s.time)}${
+        const cov = s.cov != null ? s.cov : covTotal;           // only this drop's own region
+        return `<th class="ctr" title="${esc(fmtWhen(s.at, rep.tz))}${s.regionName ? " · " + esc(s.regionName) + " drop" : ""}">${esc(s.time)}${
           rep.hours > 24 ? `<span class="dy">${esc(s.day.slice(5))}</span>` : ""}${
-          covTotal ? `<span class="cov${got < covTotal ? " short" : ""}" title="${
-            got} of ${covTotal} channel(s) got this drop">${got}/${covTotal}</span>` : ""}</th>`;
+          s.region && s.region !== "main" ? `<span class="dy">${esc(s.region.toUpperCase())}</span>` : ""}${
+          cov ? `<span class="cov${got < cov ? " short" : ""}" title="${
+            got} of ${cov} channel(s) got this drop">${got}/${cov}</span>` : ""}</th>`;
       }).join("")}
       <th class="ctr">Total</th><th class="whyc">Why</th></tr>`;
 
@@ -2798,7 +2846,8 @@ function dailyCheckModal(o){
           const ch = chanOf(r.id);
           const ask = !askable ? "" : `<div class="dc-ask">
             <button class="dc-askb" data-askall="${esc(r.id)}"
-              title="mark every drop as delivered on this channel">✓ all ${rep.slots.length}</button>
+              title="mark every drop as delivered on this channel">✓ all ${
+                rep.slots.filter(s => !s.region || s.region === r.region).length}</button>
             ${r.cells.some(x => x.state === "okh" || x.state === "miss")
               ? `<button class="dc-askb" data-askclear="${esc(r.id)}" title="clear every answer">clear</button>` : ""}
             ${ch.url ? `<a class="dc-askb" href="${esc(ch.url)}" target="_blank" rel="noopener noreferrer"
@@ -2825,6 +2874,7 @@ function dailyCheckModal(o){
                ? `<span><span class="cl okh">✓</span> confirmed by hand — click these cells</span>` : ""}
              <span><span class="cl miss">✗</span> missing</span>
              <span><span class="cl lang">⚠</span> wrong language</span>
+             ${rep.regions ? `<span><span class="cl na">–</span> another region's drop (not judged)</span>` : ""}
              <span><span class="cl none">·</span> no data</span>
            </div>`
         : `<div class="dc-empty">Nothing collected in this window yet.</div>`}`;
@@ -2838,9 +2888,12 @@ function dailyCheckModal(o){
          happened to the other five. Reading the row cells instead makes the card agree with the
          matrix by construction, and the three groups always add up to the channel count. */
       const went = [], failed = [], unknown = [], wrongLang = [];
+      let here = 0;                                  // channels of this drop's own region
       for(const r of rep.rows){
         const cell = (r.cells || [])[si];
         const st = cell && cell.state;
+        if(st === "na") continue;                    // another region's channel — not its drop
+        here++;
         if(st === "ok" || st === "okc" || st === "okh" || st === "asm") went.push(r.id);
         else if(st === "lang") wrongLang.push(r.id);
         else if(st === "miss") failed.push(r.id);
@@ -2865,7 +2918,7 @@ function dailyCheckModal(o){
               <span class="dc-pill un">${esc(s.kinds.join(", ") || "post")}</span>
               <span class="dc-pill ${failed.length ? "short" : unknown.length ? "sg" : "ok"}"
                 title="${went.length + wrongLang.length} went out · ${failed.length} did not · ${unknown.length} could not be checked"
-                >${went.length + wrongLang.length}/${rep.rows.length} channels</span>
+                >${went.length + wrongLang.length}/${here} channels${s.regionName ? " · " + esc(s.regionName) : ""}</span>
               ${(s.late || []).length ? `<span class="dc-pill late" title="${esc((s.late || [])
                   .map(l => nameOf(l.id) + " " + fmtGap(l.mins) + " behind").join(" · "))
                 }">${s.late.length} late</span>` : ""}
@@ -3157,7 +3210,8 @@ function dailyCheckModal(o){
         <div class="dc-top">
           <div class="dc-bar">
             <label class="dc-fld"><span>Region</span>
-              <select id="dcRegion" title="Which region's channels to report on — each keeps its own schedule of drops">
+              <select id="dcRegion" title="Which region's channels to show — each is always judged on its own schedule of drops">
+                <option value="all"${regionSel() === "all" ? " selected" : ""}>All regions · ${o.socials.length}</option>
                 ${REGIONS.map(([v, l]) => `<option value="${v}"${regionSel() === v ? " selected" : ""}>${esc(l)} · ${
                   o.socials.filter(s => regionOf(s) === v).length}</option>`).join("")}
               </select></label>
@@ -3231,7 +3285,7 @@ function dailyCheckModal(o){
         checks[key] = num ? Number(e.target.value) : e.target.value; saveChecks(); draw(); }; };
     set("#dcWindow", "window"); set("#dcDate", "date");
     set("#dcTz", "tz", true); set("#dcWin", "win", true); set("#dcMax", "maxPer", true);
-    set("#dcRegion", "region", false);
+    set("#dcRegion", "regionView", false);
 
     mo.querySelectorAll("input.cnt").forEach(inp => {
       inp.onchange = () => {
@@ -3253,9 +3307,12 @@ function dailyCheckModal(o){
         const id = b.dataset.askall;
         checks.confirms = checks.confirms || {};
         checks.confirms[id] = checks.confirms[id] || {};
-        for(const s of rep.slots) checks.confirms[id][s.at] = true;
+        /* only this channel's own region's drops — in the all-regions view the others are not its drops */
+        const reg = (rep.rows.find(r => r.id === id) || {}).region;
+        const own = rep.slots.filter(s => !s.region || s.region === reg);
+        for(const s of own) checks.confirms[id][s.at] = true;
         saveChecks(); draw();
-        toast(`${rep.slots.length} drop(s) confirmed on ${nameOf(id)}`, "check-check");
+        toast(`${own.length} drop(s) confirmed on ${nameOf(id)}`, "check-check");
       };
     });
     mo.querySelectorAll("[data-askclear]").forEach(b => {
@@ -3286,7 +3343,9 @@ function dailyCheckModal(o){
         wo.mode === "day"
           ? `${wo.date}  ${hhmm(rep.from, rep.tz)}–${hhmm(rep.to, rep.tz)}  (${tzLabel(rep.tz)})`
           : `${fmtWhen(rep.from, rep.tz)} → ${fmtWhen(rep.to, rep.tz)}  (${tzLabel(rep.tz)})`,
-        `expected ${rep.expected === null ? "— nothing measured" : rep.expected + " post(s) per channel"}`, "",
+        `expected ${rep.expected === null ? "— nothing measured"
+          : rep.regions ? rep.regions.map(g => g.name + " " + (g.expected === null ? "—" : g.expected)).join(", ") + " post(s) per channel"
+          : rep.expected + " post(s) per channel"}`, "",
         /* Which half reported has to be in the pasted copy too. Without it a report full of
            "no data" cannot be told apart from one where the extension was never run. */
         "SOURCES",
