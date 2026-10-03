@@ -170,18 +170,26 @@ function RunCard({ E, vm, run, running, toast }) {
 /* ── the headline: problems, all clear, or nothing yet ── */
 function Verdict({ vm }) {
   const { rep, srvIds, brwIds, platNames } = vm;
+  const [all, setAll] = useState(false);
   const n = rep.alerts.length;
+  /* a long list would push the report itself off a phone screen — the first few, then a button */
+  const SHOW = 4;
+  const shown = all ? rep.alerts : rep.alerts.slice(0, SHOW);
   if (n) return (
     <div className="verdict bad">
       <div className="verdict-h"><TriangleAlert />{n} problem{n === 1 ? "" : "s"}</div>
       <div className="alerts">
-        {rep.alerts.map((a, i) => (
+        {shown.map((a, i) => (
           <div key={i} className="alert">
             <span className={`kind ${a.kind}`}>{a.kind === "lang" ? "language" : a.kind}</span>
             <span className="txt"><b>{a.name}</b> — {a.text}</span>
           </div>
         ))}
       </div>
+      {n > SHOW && (
+        <button className="btn btn-line btn-sm" style={{ marginTop: 12 }} onClick={() => setAll(v => !v)}>
+          {all ? "Show fewer" : `Show all ${n} problems`}</button>
+      )}
     </div>
   );
   if (rep.expected === null) return (

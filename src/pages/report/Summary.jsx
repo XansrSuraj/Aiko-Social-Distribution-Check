@@ -133,6 +133,66 @@ export default function Summary({ E, vm, toast }) {
             </tbody>
           </table>
         </div>
+
+        {/* phones: the same matrix as one card per channel, so nothing scrolls sideways — each card
+            shows only its own region's drops, the times printed under each mark */}
+        <div className="mxm">
+          <div className="mxm-drops">
+            {rep.slots.map((s, i) => {
+              const got = s.present.length, cov = s.cov != null ? s.cov : covTotal;
+              return (
+                <span key={i} className="mxm-drop" title={E.fmtWhen(s.at, rep.tz)}>
+                  <b>{s.time}</b>
+                  {s.region && s.region !== "main" && <span className="rg">{s.region.toUpperCase()}</span>}
+                  {cov ? <span className={`cov${got < cov ? " short" : ""}`}>{got}/{cov}</span> : null}
+                </span>
+              );
+            })}
+          </div>
+          {rep.langs.map(lg => {
+            const rows = rep.rows.filter(r => (r.lang || "—") === lg);
+            return (
+              <div key={lg}>
+                <div className="mxm-grp">{lg === "—" ? "No language set" : LANG_NAME[lg] || lg} · {rows.length}</div>
+                {rows.map(r => {
+                  const askable = r.cells.some(x => x.askable);
+                  const ch = chanOf(r.id);
+                  const w = askable ? "" : why(r);
+                  return (
+                    <div key={r.id} className="mxm-row">
+                      <div className="mxm-h">
+                        <span className="chn"><BrandIcon platform={r.platform || ch.platform} />{r.name}</span>
+                        {total(r)}
+                      </div>
+                      <div className="mxm-cells">
+                        {r.cells.map((c, i) => {
+                          if (c.state === "na") return null;
+                          const d = E.CELL[c.state] || E.CELL.none;
+                          const Tag = c.askable ? "button" : "span";
+                          return (
+                            <Tag key={i} className={`mxm-cell${c.askable ? " ask" : ""}`} title={tipOf(E, c)}
+                              onClick={c.askable ? () => toggle(r.id, c.at) : undefined}>
+                              <span className={`cl ${d.cls}${c.lateBy ? " lt" : ""}`}>{d.g}{c.state === "ok" && c.extra ? <sup>+{c.extra}</sup> : null}</span>
+                              <span className="mxm-t">{(rep.slots[i] || {}).time}</span>
+                            </Tag>
+                          );
+                        })}
+                      </div>
+                      {askable ? (
+                        <div className="ask-row" style={{ marginTop: 10 }}>
+                          <button onClick={() => confirmAll(r)}>✓ all {rep.slots.filter(s => !s.region || s.region === r.region).length}</button>
+                          {r.cells.some(x => x.state === "okh" || x.state === "miss") && <button onClick={() => clearAll(r.id)}>clear</button>}
+                          {ch.url && <a href={ch.url} target="_blank" rel="noopener noreferrer">open</a>}
+                        </div>
+                      ) : w ? <div className="mxm-why">{w}</div> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+
         <div className="legend">
           <span><span className="cl ok">✓</span>posted</span>
           {rep.slots.some(s => (s.late || []).length) && <span><span className="cl ok lt">✓</span>posted, but behind the rest</span>}
