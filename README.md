@@ -5,8 +5,9 @@ recent posts, groups the ones that landed within minutes of each other into a si
 shows — drop by drop — which channel got it, which is **missing** it, and which got it **late**.
 
 There is nothing to configure in the browser. The channels it watches are fixed in code (the
-SportsFC set: YouTube, Telegram, X, Facebook, Instagram, TikTok and Viber, in Vietnamese and English), so
-the dashboard is exactly this: a hero, the channels it watches, and the report a run produces.
+SportsFC set: YouTube, Telegram, X, Facebook, Instagram and TikTok — Vietnamese, English and
+Brazilian Portuguese), so the site is exactly this: an overview of the channels it watches, and the
+report a run produces.
 Adding a channel is a one-line code change, not a UI.
 
 ---
@@ -25,36 +26,51 @@ Adding a channel is a one-line code change, not a UI.
 - **Shared report** — with cloud storage on, a run on one device is the same "today" every other
   device sees (a Supabase row via `api/report`); localStorage is the fallback, so an offline moment
   or an unconfigured deployment loses nothing
-- **Everything server-side, cost on screen** — Facebook, Instagram, TikTok and X are read through
-  Apify; every run reports its own billed cost and the report shows the credit left. The browser
-  extension is only a fallback for a channel the server could not read; Viber is pushed in rather
-  than read; anything pushed in to `/api/ingest` wins over reconstructing a feed
-- **Light / dark**, respects `prefers-reduced-motion`
+- **Everything server-side, cost on screen** — Facebook, Instagram and TikTok are read free from
+  each platform's own public page, with Apify as the fallback (X always via Apify); every Apify run
+  reports its own billed cost and the report shows the credit left. Anything pushed in to
+  `/api/ingest` wins over reconstructing a feed
+- **Every region on one screen** — Vietnam & English and Brazil are collected in one press and
+  each judged on its own schedule of drops
+- **Responsive** from a phone to a wide desk: the matrix scrolls inside its card with the channel
+  column pinned, the post log turns into cards, the nav folds into a menu. Respects
+  `prefers-reduced-motion`
+- **Viber was removed on 2026-10-03** — its only source was a phone forwarding notifications, which
+  could not prove whether a post went out, so it is no longer watched or shown
 
 ## Stack
 
-Static HTML + CSS + vanilla JS, plus a handful of tiny Vercel serverless functions.
-**One npm dependency** (`telegram`, lazy-loaded for the bot reader only) — the API talks to Supabase
-and Apify over plain REST, and feeds are parsed directly.
+A **React 18** single-page app built with **Vite**, plus a handful of small Vercel serverless
+functions. The API has one npm dependency (`telegram`, lazy-loaded for the bot reader only) — it
+talks to Supabase and Apify over plain REST and parses feeds directly. The front end adds React,
+[Lucide](https://lucide.dev) icons and [Simple Icons](https://simpleicons.org) brand marks, all
+bundled — nothing loads from a CDN except the fonts.
+
+The look follows [aiko.inc](https://aiko.inc): white paper, near-black ink and one signature red
+(`#a6171b` / `#e31f24`); Inter Tight for display type, Inter for reading, IBM Plex for labels and
+numbers; motion on aiko's curve `cubic-bezier(.22,1,.36,1)` — staggered fade-up reveals, a dark
+hero with a pulsing core and data chips that draw in on connector lines, a scrolling channel marquee.
+The tokens are at the top of `src/styles.css`.
 
 | | |
 |---|---|
-| `index.html` | the whole dashboard + report UI |
+| `index.html`, `src/main.jsx` | the app's entry; a two-route hash router (`#/` overview, `#/report`) |
+| `src/engine/engine.js` | everything that is not markup — collecting, `reconcile()`, the report store — as `createEngine()`; the tests load it straight from this file |
+| `src/app/` | the React glue: the engine provider, nav/footer, the report view-model, copy-as-text |
+| `src/pages/` | `Home.jsx` (the overview) and `Report.jsx`, with one file per tab under `report/` |
+| `src/styles.css`, `src/report.css` | the design system and the report's styles |
+| `public/fm-deliveries.html` | the FM Deliveries dashboard, served as-is |
+| `legacy-index.html` | the pre-React page, kept for reference only — not served |
 | `api/collect.js` | `POST` read recent posts per channel — every platform, all server-side, with each Apify run's cost |
 | `api/apify-usage.js` | `GET` Apify credit used / left this month and recent run costs (read-only) |
 | `api/thumb.js` | `GET` a post's thumbnail passed through this site — Instagram's CDN forbids other sites from drawing its images; only the platforms' own CDNs are served |
 | `api/ingest.js` | `POST` accept posts pushed in for any channel; `GET` read them back |
-| `api/notif.js` | `POST` a phone forwards one Viber notification, routed to its community |
 | `api/report.js` | `GET`/`PUT` the shared daily-check report row |
+| `api/health.js` | `GET` which readers have their credentials (presence only); also hosts the free-route probe |
 | `api/data.js` | `GET` storage mode + settings (used to detect cloud vs local) |
 | `ingest-store.js` | the pushed-in post store (Supabase row 2, or a local file) |
 | `extension/` | Chrome extension fallback for FB/IG/TikTok/X, only used when the server read of a channel fails |
 | `test/` | `npm test` — stubbed handlers plus a live parser check |
-
-Front-end libraries load from a CDN and are all **optional** — if they're blocked the app still
-works with text fallbacks: [Lucide](https://lucide.dev) (icons),
-[Simple Icons](https://simpleicons.org) (brand logos), [GSAP](https://gsap.com) (animation).
-`prefers-reduced-motion` is respected.
 
 ---
 
@@ -101,8 +117,7 @@ It is live at this point and already usable — but data is still per-browser un
    |---|---|---|
    | `SUPABASE_URL` | for a shared report | `https://xxxx.supabase.co` |
    | `SUPABASE_SERVICE_KEY` | for a shared report | the `service_role` key |
-   | `INGEST_KEY` | if Viber / any push is used | a long random string; sent as `x-ingest-key` |
-   | `VIBER_COMMUNITIES` | optional | `Name=viber:handle` pairs, comma-separated (defaults to the two SportsFC communities) |
+   | `INGEST_KEY` | if posts are pushed in | a long random string; sent as `x-ingest-key` |
    | `APIFY_TOKEN` | for Facebook, Instagram, TikTok, X | an [Apify](https://apify.com) API token. These four platforms refuse a server's own requests, so they are read through Apify scrapers (`apify/facebook-reels-scraper`, `apify/instagram-post-scraper`, `clockworks/tiktok-scraper`, `xquik/x-tweet-scraper`). Billed per post returned — about **$0.10 per full daily check** (see [DAILY-CHECK.md](DAILY-CHECK.md) §3). Without it, Facebook and TikTok go to the extension, Instagram tries its public endpoint and X its free page read. |
    | `APIFY_MAX_POSTS` | optional | newest posts each Apify run asks for, per channel (default `6`, about two days). The one knob that sets the price of a check. |
    | `TWITTERAPI_KEY` | optional | a [twitterapi.io](https://twitterapi.io) key — X's second route, tried only if the Apify read fails. |
@@ -197,7 +212,6 @@ Four things get flagged:
 | TikTok | **free**: TikTok's creator embed widget (`/embed/@user`) — Apify as fallback | nothing (`APIFY_TOKEN` for the fallback) |
 | X (Twitter) | Apify `xquik/x-tweet-scraper`, then twitterapi.io, then the free profile page | `APIFY_TOKEN` |
 | Telegram bot | a Telegram user session reading the bot's DMs | `TG_API_ID` / `TG_API_HASH` / `TG_SESSION` |
-| Viber | pushed in to `/api/ingest` by whatever publishes to it | a sender — see below |
 
 ### Free first (since 2026-10-03), Apify as the fallback
 
@@ -295,54 +309,29 @@ doesn't specially render is still visible — the feed's own stability promise i
 ever added, never removed, so the dashboard should never need to hide new data. Filters are reflected
 in the URL so a specific filtered view is shareable.
 
-## Viber — pushed in, not read out
+## Pushing posts in
 
-Viber is the one channel nothing can read. Its invite page names the community but carries none of
-its posts; it ships no web client, so there is nothing for the extension to drive; and the desktop
-app's message store is encrypted. Every way *in* is shut.
-
-So the direction is reversed. Whatever already publishes to Viber pushes its posts here:
+Any channel can be pushed in instead of read: whatever published the post sends it here, and it is
+used in place of reading the platform.
 
 ```bash
 curl -X POST http://localhost:3000/api/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"channelId":"<the channel id from the directory>","posts":[
-        {"externalId":"2026-08-16-arsenal",
-         "ts":"2026-08-16T07:48:00Z",
-         "text":"Arsenal đối đầu Manchester City — ai sẽ giành chiến thắng?",
-         "permalink":"https://sfc.my/r/d8wUU87R"}]}'
+  -H "Content-Type: application/json" -H "x-ingest-key: $INGEST_KEY" \
+  -d '{"channelId":"<the channel id>","posts":[
+        {"externalId":"2026-08-16-arsenal","ts":"2026-08-16T07:48:00Z",
+         "text":"Arsenal đối đầu Manchester City — ai sẽ giành chiến thắng?"}]}'
 ```
 
 `ts` is the only required field. Give an `externalId` too and **re-sending the same list is
-harmless** — a cron can push today's posts every hour and the count will not move. `views`,
-`likes`, `comments`, `reposts`, `duration`, `kind` and `thumb` are all optional and flow straight
-through to the report. Posts are kept for 14 days.
-
-Read back what a channel holds with `GET /api/ingest?channelId=…`.
-
-This is not a downgrade. It is the *more* dependable half of the report, because nothing Viber
-changes can break it — Viber is not involved.
-
-**Where to push from.** Anything that knows what went out:
-
-- **The system that publishes.** Every post already carries a per-channel tracked link —
-  `sfc.my/r/<token>` → `?utm_source=viber&…`. Whatever mints those tokens knows every Viber post
-  and exactly when. That is the best source there is.
-- **The phone.** A notification rule (MacroDroid, Tasker) that forwards the community's
-  notifications to this endpoint. No credentials, no scraping.
-- **By hand**, with the curl above.
+harmless**. Posts are kept for 14 days; read back with `GET /api/ingest?channelId=…`. A channel
+nobody has pushed for is simply read the normal way.
 
 **Security.** Set `INGEST_KEY` and send it as `x-ingest-key`. Without one set the endpoint answers
-only to localhost — checked on the socket, not on a header, so it cannot be spoofed. Anything
-deployed must set the key.
-
-**What it will not do** is invent history: it knows only what was pushed. A channel nobody has
-pushed for reports *unknown*, never a quiet day.
+only to localhost — checked on the socket, not on a header, so it cannot be spoofed.
 
 ### Anything pushed in wins
 
-The endpoint is not Viber-only. Push posts for *any* channel and they are used in place of reading
-the platform, which is always a reconstruction — a feed, a rendered page, captions matched by
+Push posts for a channel and they are used in place of reading the platform, which is always a reconstruction — a feed, a rendered page, captions matched by
 similarity. Whatever published the post does not reconstruct anything; it knows.
 
 So a channel that pushes gets: Facebook off caption-matching (`≈`) and onto real instants, so a
@@ -366,9 +355,6 @@ the same network are told apart, and it names anything published to an account t
 directory rather than dropping it silently. Run it on a schedule and Facebook, Instagram and TikTok
 stop depending on the extension.
 
-Ayrshare does **not** support Viber — its history covers bluesky, facebook, gmb, instagram,
-linkedin, pinterest, reddit, snapchat, telegram, threads, tiktok, twitter and youtube — so whatever
-posts to Viber still has to push here itself.
 
 ## Security notes
 
@@ -381,8 +367,8 @@ posts to Viber still has to push here itself.
 - There is no login in the dashboard by design. Keep the deployment private with **Vercel
   Deployment Protection** (Settings → Deployment Protection) — it covers the dashboard and every
   `/api` route at the platform layer, which is where an internal tool should be gated.
-- `/api/ingest` and `/api/notif` require `INGEST_KEY` (header `x-ingest-key`, `?key=`, or a body
-  field). Without a key set they answer only to localhost — checked on the socket, not a header, so
+- `/api/ingest` requires `INGEST_KEY` (header `x-ingest-key`, `?key=`, or a body
+  field). Without a key set it answers only to localhost — checked on the socket, not a header, so
   it cannot be spoofed. Anything deployed must set the key.
 - The shared report (`/api/report`) is non-sensitive operational data; its write is shape-checked
   and size-capped, refuses a stale write with HTTP 409, and can additionally be gated by
@@ -405,14 +391,17 @@ check a day with room to spare, but not two. When the credit runs out, the Apify
 ## Local development
 
 ```bash
-node dev-server.js          # http://localhost:3000 — no install, no login
-npm test                    # stubbed checker branches + a live parser check
+npm install
+npm run dev                 # the React app with hot reload — http://localhost:5173
+npm run api                 # in a second terminal: the /api handlers on :3000 (Vite proxies /api to it)
+npm run build               # the production build, into dist/
+npm test                    # every suite, plus a live parser check
 ```
 
-`dev-server.js` serves the page and routes `/api/*` to the handlers, which is all this app needs;
-`npx vercel dev` also works but wants a CLI download, a login and a linked project first. Drop a
-`.env` beside it with `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` to load the real directory
-read-only, or run without and the app keeps everything in the browser.
+`npm run build` then `node dev-server.js` serves the built app from `dist/` and routes `/api/*` to
+the handlers on one port — the closest thing to production without a Vercel login. Drop a `.env`
+beside it with `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` to read the real shared report, or run
+without and the app keeps everything in the browser.
 
-Opening `index.html` straight off disk still works too — it falls back to browser storage, and the
-features that need a server (link check, daily check, cloud sync) say so.
+Vercel builds the same way: `vercel.json` sets `npm run build` and `dist/`, and the functions in
+`api/` deploy beside it unchanged.

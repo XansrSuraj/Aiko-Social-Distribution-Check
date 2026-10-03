@@ -59,7 +59,7 @@ widening to 7 days needs no re-collect.
 node dev-server.js
 ```
 
-Nothing to install — it serves `index.html` and routes `/api/*` to the handlers in `api/`.
+After `npm run build` it serves the built app from `dist/` and routes `/api/*` to the handlers in `api/`.
 `npx vercel dev` works too, but wants a CLI download, a login and a linked project first.
 
 Open <http://localhost:3000>, pick an organization, press **Daily check** → **Collect**.
@@ -191,7 +191,7 @@ npm run test:live             # api/collect against the real channels
 change what they serve. The other two are stubbed, because a test that depends on whether
 Instagram feels like rate-limiting you today proves nothing.
 
-`reconcile.test.js` reads the logic out of `index.html` rather than keeping a copy, so the tests
+`reconcile.test.js` reads the logic out of `src/engine/engine.js` rather than keeping a copy, so the tests
 cannot pass against code that is no longer what ships.
 
 ---

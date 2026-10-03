@@ -102,10 +102,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  /* ── static files ── */
+  /* ── static files: the built React app (npm run build) when there is one ── */
   if (pathname === "/") pathname = "/index.html";
-  const file = path.normalize(path.join(ROOT, pathname));
-  if (!file.startsWith(ROOT)) { res.statusCode = 403; return res.end("Forbidden"); }
+  const STATIC = fs.existsSync(path.join(ROOT, "dist", "index.html")) ? path.join(ROOT, "dist") : ROOT;
+  const file = path.normalize(path.join(STATIC, pathname));
+  if (!file.startsWith(STATIC)) { res.statusCode = 403; return res.end("Forbidden"); }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.statusCode = 404; return res.end("Not found: " + pathname);
   }

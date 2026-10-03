@@ -21,7 +21,6 @@ SportsFC publishes the same content — match previews, highlight reels, stat gr
 | X | `Sportsfcvn` | — |
 | TikTok | `@sportsfc.vn` | — |
 | Telegram bot | `@SportsfcBot` | — |
-| Viber | Sportsfc.vn | Sportsfc.fans |
 
 Every day the check answers one question:
 
@@ -52,7 +51,6 @@ browser or login is involved.
 | TikTok | Apify `clockworks/tiktok-scraper` | paid per video |
 | X | Apify `xquik/x-tweet-scraper` | paid per post |
 | Telegram bot | a Telegram user session reading the bot's DMs | free — **session currently dead, §6** |
-| Viber ×2 | **pushed in** by a phone forwarding its notifications | free — Viber cannot be read at all |
 
 **Why Apify for four platforms.** Facebook, Instagram, TikTok and X all refuse requests from a
 server's (datacenter) IP address — Instagram answers in about 25 ms with HTTP 429, X serves an empty
@@ -98,7 +96,7 @@ account's usage moved by the same totals.
 | Instagram `sportsfc.vn` | 6 posts × $0.0017 | $0.0102 |
 | Instagram `sportsfc.fans` | 1 "restricted profile" item × $0.0017 | $0.0017 |
 | X `Sportsfcvn` | 6 posts × $0.00015 + a little compute | $0.0010 |
-| YouTube, Telegram, Viber, bot | — | $0 |
+| YouTube, Telegram, bot | — | $0 |
 | **One full daily check** | | **$0.096** |
 
 Once Instagram `sportsfc.fans` becomes readable (§6) it costs the same as `sportsfc.vn`, and a check
@@ -212,9 +210,9 @@ and the second defeats the point of an automatic check.
 | **Instagram `sportsfc.fans` is age-restricted** | Instagram shows it only to logged-in adults, so no logged-out reader (Apify included) can see it. Reads *unknown*; costs $0.0017 per check. | In that account's Instagram settings, remove the minimum-age restriction. Nothing to change here — it starts working on the next check. |
 | **Facebook has no captions** | The Reels tab gives times but not text, so Facebook gets no language check, and a Facebook post that is not a reel (a photo) would read as missing. | None needed while SportsFC posts reels; the extension still reads captions if ever needed. |
 | **Telegram bot session is dead** | `401 AUTH_KEY_UNREGISTERED` | Re-run `tg-login.js` and update `TG_SESSION` on Vercel. |
-| **Viber** | Depends on the phone forwarder being on. | Out of scope for this change. |
+| **Viber removed (2026-10-03)** | Its only source was a phone forwarding notifications, which could not prove a post went out. It is no longer watched, shown, or served (`api/notif`, `api/notiflog` and the Viber monitor in `api/health` are gone). | If it comes back, it needs a source that can actually confirm delivery. |
 | **twitterapi.io balance is empty** (HTTP 402) | None now — it is only X's second route if Apify fails. | Top up or remove `TWITTERAPI_KEY`. |
-| **No English X or TikTok channel** | Only the VN accounts are in the directory. | If they exist, add them to `SPORTSFC` in `index.html`: about +$0.001 (X) or +$0.023 (TikTok) per check. |
+| **No English X or TikTok channel** | Only the VN accounts are in the directory. | If they exist, add them to `SPORTSFC` in `src/engine/engine.js`: about +$0.001 (X) or +$0.023 (TikTok) per check. |
 | **Credit runs out ~17 Oct** at one check a day | Apify channels fall back to the extension until 24 Oct. | Add Apify credit, or check less often until the reset. |
 
 ## 7. The reconciliation engine, briefly (unchanged by all of this)
@@ -227,10 +225,11 @@ The part that judges the collected posts was already mature and was not touched:
 - **Content match** — Facebook read by the extension (captions, unreliable times) is matched on what
   a post says rather than when, marked ≈. Read from its Reels tab (exact times, no captions) it is
   matched on time like every other channel.
-- **Timefold** — Viber's notifications are folded into drops by time, since there is no caption.
+- **Timefold** — a channel known only by notification times is folded into drops by time. Built for
+  Viber; dormant since Viber was removed, kept because its tests still pin the behaviour.
 - **Expected count** — inferred from the channel that received the most; nobody types it in.
 - **Language** — the caption's language is checked against the channel's; a Vietnamese reel on an
   English channel counts as delivered but is flagged.
 
-The full logic is `reconcile()` in `index.html`, commented with the real incidents that shaped each
+The full logic is `reconcile()` in `src/engine/engine.js`, commented with the real incidents that shaped each
 rule.

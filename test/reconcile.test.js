@@ -1,5 +1,5 @@
 /**
- * reconcile() and detectLang(), read straight out of index.html.
+ * reconcile() and detectLang(), read straight out of src/engine/engine.js.
  *
  * The logic lives inline in the page, so this extracts the block rather than keeping a copy that
  * could drift from what ships.
@@ -20,7 +20,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "..", "src", "engine", "engine.js"), "utf8");
 const marker = html.indexOf("daily check ═");
 const uiStart = html.indexOf("/* ── report UI ──");
 if (marker < 0 || uiStart < 0) {

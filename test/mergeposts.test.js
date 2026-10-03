@@ -1,5 +1,5 @@
 /**
- * mergePosts(), read straight out of index.html: a post read again refreshes what is stored about it
+ * mergePosts(), read straight out of src/engine/engine.js: a post read again refreshes what is stored about it
  * (newer counters, a thumbnail or hashtags an older reader lacked) without an empty field wiping a
  * filled one, only genuinely new posts count as added, and posts older than POST_KEEP_DAYS are
  * dropped — the whole store travels in one shared report row capped at 2 MB.
@@ -7,10 +7,10 @@
  *   node test/mergeposts.test.js
  */
 const fs = require("fs"), path = require("path");
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "..", "src", "engine", "engine.js"), "utf8");
 const A = html.indexOf("const POST_KEEP_DAYS");
 const B = html.indexOf("/* ── language ──", A);
-if (A < 0 || B < 0) { console.error("could not find mergePosts in index.html"); process.exit(1); }
+if (A < 0 || B < 0) { console.error("could not find mergePosts in src/engine/engine.js"); process.exit(1); }
 
 let pass = 0, fail = 0;
 const ok = (good, label, extra) => { good ? pass++ : fail++; console.log(`  ${good ? "pass" : "FAIL"}  ${label}${extra ? "  — " + extra : ""}`); };

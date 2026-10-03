@@ -1,9 +1,9 @@
 /**
- * collectServer(), read straight out of index.html, must split its work so a slow channel can never
+ * collectServer(), read straight out of src/engine/engine.js, must split its work so a slow channel can never
  * take a fast one down with it. This is the regression guard for the outage where all 11 channels
  * went into ONE /api/collect request, the four Apify (Facebook/Instagram) reads pushed it past the
  * 60s function ceiling, and when it timed out every server channel — including the fast YouTube /
- * Telegram / Viber ones — came back blank.
+ * Telegram ones — came back blank.
  *
  * The contract this pins:
  *   · the fast channels share ONE request; each SLOW (Apify: facebook/instagram/tiktok/x) channel
@@ -14,11 +14,11 @@
  *   node test/collectsplit.test.js
  */
 const fs = require("fs"), path = require("path");
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "..", "src", "engine", "engine.js"), "utf8");
 
 const START = html.indexOf("async function collectServer(o){");
 const END = html.indexOf("/* ── the browser half", START);
-if (START < 0 || END < 0) { console.error("could not find collectServer in index.html"); process.exit(1); }
+if (START < 0 || END < 0) { console.error("could not find collectServer in src/engine/engine.js"); process.exit(1); }
 const src = html.slice(START, END);
 
 let pass = 0, fail = 0;
@@ -27,7 +27,7 @@ const ok = (good, label, extra) => { good ? pass++ : fail++; console.log(`  ${go
 /* the channels a real run collects: the free platforms plus the Apify ones */
 const CHANS = [
   { id: "yt-vn", platform: "youtube" }, { id: "tg-vn", platform: "telegram" },
-  { id: "x-vn", platform: "x" }, { id: "vb-vn", platform: "viber" },
+  { id: "x-vn", platform: "x" }, { id: "tg-fans", platform: "telegram" },
   { id: "fb-vn", platform: "facebook" }, { id: "fb-fans", platform: "facebook" },
   { id: "ig-vn", platform: "instagram" }, { id: "ig-fans", platform: "instagram" },
 ];
@@ -84,10 +84,10 @@ function makeCollectServer(fetchStub, checks) {
     ok(slowReqs.length === 5 && slowReqs.every(ids => ids.length === 1), "each slow (Apify) channel — X included — is in its own request",
       JSON.stringify(slowReqs));
     const fastReq = requests.find(ids => ids.includes("yt-vn"));
-    ok(fastReq && fastReq.includes("tg-vn") && fastReq.includes("vb-vn")
+    ok(fastReq && fastReq.includes("tg-vn") && fastReq.includes("tg-fans")
        && !fastReq.some(id => /^(fb|ig|x)-/.test(id)),
       "the free channels share one request, with no Apify channel in it", JSON.stringify(fastReq));
-    ok(["yt-vn","tg-vn","x-vn","vb-vn","fb-vn","fb-fans","ig-vn","ig-fans"].every(id => (checks.posts[id] || []).length === 1),
+    ok(["yt-vn","tg-vn","x-vn","tg-fans","fb-vn","fb-fans","ig-vn","ig-fans"].every(id => (checks.posts[id] || []).length === 1),
       "every channel's posts are stored");
     ok(checks.apifyLast && checks.apifyLast.runs === 5 && Math.abs(checks.apifyLast.usd - 0.05) < 1e-9 &&
        Math.abs(checks.apifyCheckUsd - 0.05) < 1e-9,
@@ -102,7 +102,7 @@ function makeCollectServer(fetchStub, checks) {
     await makeCollectServer(fetchStub, checks)({});
 
     ok((checks.posts["yt-vn"] || []).length === 1 && (checks.posts["tg-vn"] || []).length === 1
-       && (checks.posts["x-vn"] || []).length === 1 && (checks.posts["vb-vn"] || []).length === 1,
+       && (checks.posts["x-vn"] || []).length === 1 && (checks.posts["tg-fans"] || []).length === 1,
       "a failed slow request leaves the FAST channels fully collected", JSON.stringify(Object.keys(checks.posts)));
     ok((checks.posts["fb-vn"] || []).length === 1 && (checks.posts["ig-fans"] || []).length === 1,
       "and the OTHER slow channels too");
@@ -112,12 +112,12 @@ function makeCollectServer(fetchStub, checks) {
   }
 
   /* 3) a provisional bill is settled later from the same runs — refreshApifyUsage, read straight
-        out of index.html like collectServer above */
+        out of src/engine/engine.js like collectServer above */
   console.log("\n── a press's provisional Apify bill is replaced once Apify settles it");
   {
     const A = html.indexOf("let apifyInfo = null;");
     const B = html.indexOf("let extVersion = null;", A);
-    if (A < 0 || B < 0) { console.error("could not find refreshApifyUsage in index.html"); process.exit(1); }
+    if (A < 0 || B < 0) { console.error("could not find refreshApifyUsage in src/engine/engine.js"); process.exit(1); }
     const make = (checks, answers, timers) => {
       const asked = [];
       const fetchStub = async url => { asked.push(url); const a = answers.shift();

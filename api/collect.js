@@ -11,9 +11,6 @@
  *   tiktok    — Apify (clockworks/tiktok-scraper)           } its own exact cost — see the Apify
  *   x         — Apify (xquik/x-tweet-scraper), then twitterapi.io, then the free page read
  *   tgbot     — a Telegram user-session reading the bot's DMs (TG_SESSION)
- *   viber     — nothing to read: no public post list, no web client, and an encrypted local
- *               store. So it is pushed in instead — whatever publishes to Viber posts to
- *               /api/ingest and this reads that back. See ingest-store.js.
  *
  * A channel that fails comes back ok:false with a note. One dead channel must never take the
  * others down with it, because the whole point is spotting the one channel that is behaving
@@ -1580,29 +1577,6 @@ async function collectTgBot(ch) {
   return { posts, source: "telegram-mtproto", note: "read server-side via a Telegram user-session" };
 }
 
-/* ═══════════════════ viber (pushed in, not read out) ═══════════════════ */
-
-/* Viber is the one channel here that cannot be read at all: its invite page carries no posts, it
-   ships no web client for the extension to drive, and the desktop app's message store is
-   encrypted. Rather than lose the channel, the direction is reversed — whatever publishes to
-   Viber pushes its posts to /api/ingest, and this reads them back.
-
-   That makes it strictly more dependable than the platforms that *are* readable, because nothing
-   Viber changes can break it. What it cannot do is invent history: it knows exactly what was
-   pushed and nothing before that, so an empty store is reported as unknown rather than as a
-   channel that posted nothing. */
-async function collectViber(ch) {
-  const posts = await ingest.getPosts(ch.id);
-  if (!posts.length) {
-    throw new Error("Nothing has been pushed to /api/ingest for this channel yet — " +
-                    "treat this as unknown, not empty.");
-  }
-  return {
-    posts,
-    note: `${posts.length} post(s) pushed in via /api/ingest, kept for ${ingest.MAX_DAYS} days`,
-  };
-}
-
 /* ═══════════════════ dispatch ═══════════════════ */
 
 /* Platforms with no server route at all once the free readers are switched off and no Apify token
@@ -1633,13 +1607,12 @@ async function collectOne(ch, cutoff, pushedAll) {
      similarity. Whatever published the post does not have to reconstruct anything: it knows. So if
      something has pushed posts for this channel, they are used in place of guessing, and the
      platform is never asked. That is what lets Facebook stop being matched on captions, TikTok
-     stop being unreadable, and Viber exist at all — the same door for all of them.
+     stop being unreadable — the same door for all of them.
 
      Two keys are tried, not one. In local mode the directory lives in the browser, so the channel's
      own internal id is not something a phone automation rule — or anyone outside that browser —
      can ever know or paste in. The handle in its URL is the one thing about a channel that is
-     public and stable, so a push filed under that (e.g. "sportsfc.vn", read straight off
-     invite.viber.com/?g2=…) is found here even though it was never told the id. The id is tried
+     public and stable, so a push filed under that (e.g. "sportsfc.vn") is found here even though it was never told the id. The id is tried
      first only because it is the more specific claim when both happen to exist.
 
      pushedAll is the whole ingest store, read ONCE by the handler below and handed to every
@@ -1667,8 +1640,7 @@ async function collectOne(ch, cutoff, pushedAll) {
   }
 
   const fns = { youtube: collectYouTube, telegram: collectTelegram, instagram: collectInstagram,
-                x: collectX, facebook: collectFacebook, tiktok: collectTiktok, tgbot: collectTgBot,
-                viber: collectViber };
+                x: collectX, facebook: collectFacebook, tiktok: collectTiktok, tgbot: collectTgBot };
   const fn = fns[ch.platform];
   if (!fn) return { ...base, source: "unsupported", note: "No collector for platform " + ch.platform };
 
@@ -1676,7 +1648,7 @@ async function collectOne(ch, cutoff, pushedAll) {
   const source = { youtube: "youtube-web", telegram: "telegram-web",
                    instagram: paid ? "instagram-apify" : "instagram-public", x: paid ? "x-apify" : "x-web",
                    facebook: "facebook-reels",
-                   tiktok: "tiktok-apify", tgbot: "telegram-mtproto", viber: "ingest" }[ch.platform];
+                   tiktok: "tiktok-apify", tgbot: "telegram-mtproto" }[ch.platform];
   try {
     /* the window is handed to the collector so it can stop reading once it is past it —
        YouTube pages its metadata lookups and would otherwise walk the whole grid every run */

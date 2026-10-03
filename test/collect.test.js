@@ -27,15 +27,11 @@ const CHANNELS = [
   { id: "fb-vn",   platform: "facebook",  url: "https://facebook.com/sportsfc.vn" },
   { id: "tt-vn",   platform: "tiktok",    url: "https://tiktok.com/@sportsfc.vn" },
   { id: "x-vn",    platform: "x",         url: "https://x.com/Sportsfcvn" },
-  /* a channel id nothing has ever been pushed for, so this stays a statement about the empty
-     store rather than about whatever happens to be sitting in it today */
-  { id: "vb-never-pushed", platform: "viber", url: "https://invite.viber.com/?g2=AQBb1E9b" },
   /* the id is deliberately unrelated to what gets pushed below — in local mode the directory
      lives in the browser, so a phone automation rule can never know this id and must be found by
-     the handle alone. Named vb-by-handle for the check below; the opaque-looking id is what a
+     the handle alone. Named push-by-handle for the check below; the opaque-looking id is what a
      real browser-assigned uid() would look like, and is never what gets pushed to. */
-  { id: "vb-by-handle", platform: "viber",
-    url: "https://invite.viber.com/?g2=zzz", handle: "sportsfc-test-handle" },
+  { id: "push-by-handle", platform: "telegram", url: "https://t.me/sportsfc_test_handle" },
 ];
 
 const MUST_COLLECT = ["yt-vn", "yt-fans", "tg-vn", "tg-fans", "x-vn"];
@@ -47,7 +43,7 @@ const iso = s => !isNaN(new Date(s).getTime());
 /* seeded under the handle alias, never under the channel's own id — proving the lookup this test
    is here for. Removed again once the run is done, so a live-network test does not leave data
    behind for the next run to trip over. */
-await ingest.addPosts("viber:sportsfc-test-handle",
+await ingest.addPosts("telegram:sportsfc_test_handle",
   [{ externalId: "handle-alias-1", ts: new Date().toISOString(), text: "found by handle, not by id" }]);
 
 collect({ method: "POST", body: { channels: CHANNELS, days: 6 } }, {
@@ -145,23 +141,13 @@ collect({ method: "POST", body: { channels: CHANNELS, days: 6 } }, {
       check(!r.unsupported, `${id} is never marked unsupported — it has a server-side reader now`);
     }
 
-    /* Viber is pushed in, never read out — so an empty store means nobody has pushed yet, which
-       says nothing at all about whether the channel posted. It must never read as a quiet day. */
-    {
-      const r = by("vb-never-pushed");
-      check(r.ok === false && /unknown, not empty/i.test(r.note || ""),
-            "vb-never-pushed says unknown, not empty", r.note);
-      check(r.source === "ingest", "and names the route it would have used", String(r.source));
-      check(!r.unsupported, "viber is no longer called unsupported — it has a way in now");
-    }
-
     /* In local mode the directory lives in the browser, so a channel's internal id is not
        something anything outside that browser — a phone automation rule least of all — can ever
        know. A push filed under the public handle must still be found. */
     {
-      const r = by("vb-by-handle");
+      const r = by("push-by-handle");
       check(r.ok === true && r.source === "ingest" && r.posts.length === 1,
-            "vb-by-handle is found by its handle, with no internal id ever supplied",
+            "push-by-handle is found by its handle, with no internal id ever supplied",
             JSON.stringify(r));
     }
 
@@ -186,7 +172,7 @@ collect({ method: "POST", body: { channels: CHANNELS, days: 6 } }, {
        ever run — so the seeded fixture has to be cleaned up here, not after collect() resolves,
        or a live-network run leaves it behind for the next one to trip over. */
     const ingestAll = await ingest.readAll();
-    delete ingestAll["viber:sportsfc-test-handle"];
+    delete ingestAll["telegram:sportsfc_test_handle"];
     await ingest.writeAll(ingestAll);
     process.exit(fail ? 1 : 0);
   },

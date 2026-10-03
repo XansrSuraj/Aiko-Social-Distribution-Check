@@ -7,3 +7,6 @@ Thumbs.db
 *.log
 org-hub-backup.json
 .ingest.json
+
+# the built React app
+dist/
