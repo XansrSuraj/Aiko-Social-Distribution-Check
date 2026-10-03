@@ -1,4 +1,4 @@
-# SportsFC — Daily check
+# Daily check — SportsFC and MatchPulse
 
 **Did today's content reach every channel?** One dashboard, one button. It collects each channel's
 recent posts, groups the ones that landed within minutes of each other into a single **drop**, and
@@ -9,6 +9,19 @@ SportsFC set: YouTube, Telegram, X, Facebook, Instagram and TikTok — Vietnames
 Brazilian Portuguese), so the site is exactly this: an overview of the channels it watches, and the
 report a run produces.
 Adding a channel is a one-line code change, not a UI.
+
+**Two brands, one site.** The switch in the nav moves between them; each has its own channels,
+overview, report and saved history, and never mixes with the other:
+
+| Brand | Pages | Channels | Regions (each judged on its own drops) |
+|---|---|---|---|
+| SportsFC | `#/`, `#/report` | 14 | Vietnam & English · Brazil |
+| MatchPulse | `#/matchpulse`, `#/matchpulse/report` | 9 | Hindi · English |
+
+A brand is one entry in `BRANDS` in `src/engine/engine.js` (its channels, regions and default
+timezone) plus one line in `BRANDS` in `src/app/core.jsx` (its name and URL). Its report is
+saved under its own localStorage key and its own shared row (`api/report?brand=…` — SportsFC row 3,
+MatchPulse row 4).
 
 ---
 

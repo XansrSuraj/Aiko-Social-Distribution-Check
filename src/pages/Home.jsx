@@ -1,18 +1,19 @@
 import { useMemo } from "react";
 import { ArrowRight, Play, Loader2, ScanSearch, GitMerge, Flag } from "lucide-react";
 import { useApp, go, BrandIcon, brandColor, Reveal } from "../app/core.jsx";
-import { buildReport } from "../app/viewmodel.js";
+import { buildReport, LANG_NAME as LANG } from "../app/viewmodel.js";
 
 const ago = ts => {
   if (!ts) return "never";
   const m = Math.round((Date.now() - new Date(ts).getTime()) / 60e3);
   return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago";
 };
-const LANG = { vi: "Vietnamese", en: "English", pt: "Portuguese" };
+/* "A, B and C" */
+const listOf = a => a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1];
 const DELIVERED = ["ok", "okc", "okh", "asm"];
 
 export default function Home() {
-  const { E, run, running } = useApp();
+  const { E, run, running, path } = useApp();
   const vm = buildReport(E);
   const { rep, checks } = vm;
 
@@ -24,7 +25,7 @@ export default function Home() {
   const onTime = rowsJudged.filter(r => r.status === "ok").length;
   const langIssues = rep.alerts.filter(a => a.kind === "lang").length;
   const perCheck = checks.apifyCheckUsd;
-  const all = E.dcChannels(E.SPORTSFC);
+  const all = E.dcChannels(E.ORG);
   const postsToday = vm.logPosts.length;
 
   const chips = [
@@ -53,15 +54,15 @@ export default function Home() {
         <div className="wrap">
           <div className="hero-grid">
             <div>
-              <Reveal><span className="eyebrow">SportsFC · Daily check</span></Reveal>
+              <Reveal><span className="eyebrow">{E.ORG.name} · Daily check</span></Reveal>
               <Reveal delay={.1} as="h1" className="display xl">Did today's content <b>reach every channel?</b></Reveal>
-              <Reveal delay={.2}><p className="lead">Every post on every channel, read the moment you ask — matched drop by drop across
-                Vietnam, English and Brazil, with what went out, when, and in which language.</p></Reveal>
+              <Reveal delay={.2}><p className="lead">Every post on every channel, read the moment you ask — matched drop by drop across{" "}
+                {listOf(E.REGIONS.map(r => r[1]))}, with what went out, when, and in which language.</p></Reveal>
               <Reveal delay={.3} className="hero-cta">
-                <button className="btn btn-white btn-lg" disabled={running} onClick={() => { go("/report"); run(); }}>
+                <button className="btn btn-white btn-lg" disabled={running} onClick={() => { go(path("/report")); run(); }}>
                   {running ? <Loader2 className="spin" /> : <Play />}{running ? "Checking…" : "Run daily check"}
                 </button>
-                <a href="#/report" className="btn btn-ghost-dk btn-lg">Open the report <ArrowRight /></a>
+                <a href={"#" + path("/report")} className="btn btn-ghost-dk btn-lg">Open the report <ArrowRight /></a>
               </Reveal>
             </div>
             <div className="hud" aria-label="Today at a glance">
@@ -121,7 +122,7 @@ export default function Home() {
           </div>
           <div className="regions">
             {E.REGIONS.map(([rid, rname], ri) => {
-              const cs = E.dcChannels(E.SPORTSFC, rid);
+              const cs = E.dcChannels(E.ORG, rid);
               if (!cs.length) return null;
               const langs = [...new Set(cs.map(c => c.lang))];
               return (
@@ -179,7 +180,7 @@ export default function Home() {
             ))}
           </div>
           <Reveal delay={.2} style={{ marginTop: 44 }}>
-            <button className="btn btn-red btn-lg" disabled={running} onClick={() => { go("/report"); run(); }}>
+            <button className="btn btn-red btn-lg" disabled={running} onClick={() => { go(path("/report")); run(); }}>
               {running ? <Loader2 className="spin" /> : <Play />}{running ? "Checking…" : "Run today's check"}
             </button>
           </Reveal>

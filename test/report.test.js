@@ -19,10 +19,10 @@ const realFetch = global.fetch;
 
 function load() { delete require.cache[require.resolve(MOD)]; return require(MOD); }
 
-function call(method, body, headers) {
+function call(method, body, headers, query) {
   const handler = load();
   return new Promise(resolve => {
-    handler({ method, body, headers: headers || {}, query: {} },
+    handler({ method, body, headers: headers || {}, query: query || {} },
       { setHeader() {}, status(c) { this._c = c; return this; },
         end() { resolve({ status: this._c || 200, body: null }); },
         json(p) { resolve({ status: this._c || 200, body: p }); } });
@@ -88,6 +88,24 @@ const check = (good, label, extra) => {
   r = await call("PUT", { data: { lastRun: "mine" }, baseUpdatedAt: "2026-08-21T10:00:00.000Z" });
   check(r.status === 409 && r.body.conflict, "a write based on an old version is refused with 409", JSON.stringify(r.body));
   check(store.data.lastRun === "server-newer", "and the newer report is left intact", JSON.stringify(store.data));
+
+  console.log("\n── each brand has its own row");
+  const rowsSeen = [];
+  const prevFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    if ((opts || {}).method === "POST") rowsSeen.push(JSON.parse(opts.body)[0].id);
+    else { const m = String(url).match(/id=eq\.(\d+)/); if (m) rowsSeen.push(Number(m[1])); }
+    return prevFetch(url, opts);
+  };
+  await call("PUT", { data: { lastRun: "sfc" } });
+  check(rowsSeen.pop() === 3, "SportsFC writes row 3, as it always has");
+  await call("PUT", { data: { lastRun: "mp" } }, {}, { brand: "matchpulse" });
+  check(rowsSeen.pop() === 4, "MatchPulse writes its own row 4");
+  await call("GET", null, {}, { brand: "matchpulse" });
+  check(rowsSeen.pop() === 4, "and reads it back from row 4");
+  r = await call("GET", null, {}, { brand: "1" });
+  check(r.status === 400, "an unknown brand cannot pick some other row of the table", String(r.status));
+  global.fetch = prevFetch;
 
   console.log("\n── an admin password, if set, gates the write");
   process.env.ADMIN_PASSWORD = "secret";

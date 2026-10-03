@@ -129,7 +129,7 @@ function RunCard({ E, vm, run, running, toast }) {
   const msg = E.extReady && E.extStale()
     ? <>Extension is v{E.extVersion} but this build needs v{E.EXT_WANT} — reload it at chrome://extensions</>
     : E.apifyInfo && E.apifyInfo.configured === false && brwIds.length
-      ? <>Apify isn't configured — Facebook, Instagram and TikTok are read free; X needs Apify</>
+      ? <>Apify isn't configured — {platNames(brwIds.filter(id => vm.chanOf(id).platform !== "x"))} read free{vm.chans.some(c => c.platform === "x") ? "; X needs Apify" : ""}</>
       : <><b>Every channel, server-side, one press.</b> Free readers first, Apify only where they fail.</>;
   const row = (name, ids, note) => {
     const have = gotFrom(ids), total = ids.length;

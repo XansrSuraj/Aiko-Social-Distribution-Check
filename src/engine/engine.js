@@ -8,7 +8,10 @@
  * only wrapped in createEngine(env) so the React app owns it. The test suite reads its sections by
  * the same section markers it always did (the daily-check banner, the report-UI banner, collectServer).
  *
- *   const engine = createEngine({ toast, onChange });   // onChange: the report changed — redraw
+ *   const engine = createEngine({ toast, onChange, brand });   // onChange: the report changed — redraw
+ *
+ * One engine per brand (SportsFC, MatchPulse): each has its own channels, regions, saved report
+ * (localStorage key and shared report row) and default timezone, so the two never mix.
  */
 export function createEngine(env = {}) {
 /* the bits of the page the engine used to reach for directly */
@@ -72,7 +75,37 @@ const SPORTSFC = {
     { id:"tg-bot-vn", platform:"tgbot",   url:"https://t.me/SportsfcBot",              handle:"SportsfcBot",   note:"vietnamese" },
   ],
   websites: [], tags: [],
+  regions: [["main", "Vietnam & English"], ["br", "Brazil"]], tz: 7,
 };
+
+/* MatchPulse (added 2026-10-04): the same content in Hindi and English, but the two languages go
+   out on their own clocks — the same post measured 20:44 in English and 21:21 in Hindi — so each
+   language is its own REGION, judged on its own drops. Hindi captions are Devanagari with English
+   match names mixed in ("PAK vs IND 👀 … रोमांचक टक्कर"); detectLang reads the script.
+   Ids carry an mp- prefix so nothing server-side keyed by channel id can collide with SportsFC's. */
+const MATCHPULSE = {
+  id: "matchpulse", name: "MatchPulse",
+  socials: [
+    { id:"mp-fb-hi", platform:"facebook",  url:"https://www.facebook.com/MPXI.Hindi",          handle:"MPXI.Hindi",          note:"hindi",   region:"hi" },
+    { id:"mp-ig-hi", platform:"instagram", url:"https://www.instagram.com/matchpulse.hindi.ai", handle:"matchpulse.hindi.ai", note:"hindi",   region:"hi" },
+    { id:"mp-tg-hi", platform:"telegram",  url:"https://t.me/matchpulseaihindi",               handle:"matchpulseaihindi",   note:"hindi",   region:"hi" },
+    { id:"mp-yt-hi", platform:"youtube",   url:"https://www.youtube.com/@MPHindi.Cricket",     handle:"@MPHindi.Cricket",    note:"hindi",   region:"hi",
+      ytChannelId:"UCr0CGnO3uuE72mXXkZzmwRw" },
+    { id:"mp-fb-en", platform:"facebook",  url:"https://www.facebook.com/ai.matchpulse",       handle:"ai.matchpulse",       note:"english", region:"en" },
+    { id:"mp-ig-en", platform:"instagram", url:"https://www.instagram.com/matchpulse.ai",      handle:"matchpulse.ai",       note:"english", region:"en" },
+    { id:"mp-tg-en", platform:"telegram",  url:"https://t.me/matchpulseai",                    handle:"matchpulseai",        note:"english", region:"en" },
+    { id:"mp-tt-en", platform:"tiktok",    url:"https://www.tiktok.com/@matchpulse.ai",        handle:"matchpulse.ai",       note:"english", region:"en" },
+    { id:"mp-yt-en", platform:"youtube",   url:"https://www.youtube.com/@matchpulse-ai",       handle:"@matchpulse-ai",      note:"english", region:"en",
+      ytChannelId:"UCrrDEGwmgVH4qHbefFDmeSQ" },
+  ],
+  websites: [], tags: [],
+  regions: [["hi", "Hindi"], ["en", "English"]], tz: 5.5,
+};
+const BRANDS = { sportsfc: SPORTSFC, matchpulse: MATCHPULSE };
+const ORG = BRANDS[env.brand] || SPORTSFC;
+/* SportsFC keeps the storage names it always had, so nothing already saved is lost */
+const BRAND_SUFFIX = ORG === SPORTSFC ? "" : "." + ORG.id;
+const REPORT_URL = "api/report" + (ORG === SPORTSFC ? "" : "?brand=" + ORG.id);
 
 /* storage mode: cloud (a shared Supabase row) or this browser only */
 async function pull(){
@@ -100,10 +133,10 @@ async function pull(){
    Runs accumulate. Each source returns only its most recent posts (Telegram ~20, YouTube 15,
    Instagram ~12, X as few as 3 and rarely more than ~10), so merging on every run builds a
    history none of them offer on their own. */
-const CKEY = "orghub.checks";
-const BRUN = "orghub.browserRun";       // handoff slot the extension writes into
+const CKEY = "orghub.checks" + BRAND_SUFFIX;
+const BRUN = "orghub.browserRun" + BRAND_SUFFIX;       // handoff slot the extension writes into
 
-let checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:{}, confirms:{}, tz:7, win:15,
+let checks = { posts:{}, counts:{}, captions:{}, meta:{}, ytIds:{}, confirms:{}, tz:ORG.tz, win:15,
                window:"today", date:null, maxPer:4, lastRun:null };
 try{
   const c = JSON.parse(localStorage.getItem(CKEY) || "null");
@@ -125,7 +158,7 @@ const saveChecks = () => {
 async function pullReport(){
   if(cloud.mode !== "cloud") return;
   try{
-    const r = await fetch("api/report", { cache:"no-store" });
+    const r = await fetch(REPORT_URL, { cache:"no-store" });
     const j = await r.json();
     if(j && j.ok && j.data && typeof j.data === "object"){
       checks = { ...checks, ...j.data };
@@ -145,7 +178,7 @@ function pushReport(){
   clearTimeout(reportPushT);
   reportPushT = setTimeout(async () => {
     try{
-      const r = await fetch("api/report", {
+      const r = await fetch(REPORT_URL, {
         method:"PUT",
         headers:{ "Content-Type":"application/json", "x-admin-key":adminKey() },
         body:JSON.stringify({ data:checks, baseUpdatedAt:reportUpdatedAt })
@@ -186,7 +219,7 @@ function mergePosts(channelId, incoming){
 /* ── language ──────────────────────────────────────────────────────────────
    Language lives in the channel's free-text note and is typo-prone ("chaina"), so match
    loosely onto ISO codes — otherwise a misspelling silently splits a language group. */
-const LANGS = [["vi", /viet|\bvn\b|tiếng|tieng/i], ["th", /thai|\bth\b/i],
+const LANGS = [["hi", /hindi|\bhi\b/i], ["vi", /viet|\bvn\b|tiếng|tieng/i], ["th", /thai|\bth\b/i],
                ["zh", /chin|chai|\bcn\b|中文|mandarin/i], ["pt", /portug|brazil|brasil|\bpt\b|\bbr\b/i],
                ["en", /eng|\ben\b/i]];
 function normLang(s){
@@ -275,6 +308,7 @@ const PT_WORDS = /(?<!\p{L})(de|da|das|dos|que|não|vai|com|para|uma|um|os|contr
 const PT_ONLY = /[çÇ]/g;
 const RX_THAI = /[฀-๿]/;
 const RX_CJK = /[㐀-䶿一-鿿]/;
+const RX_DEVA = /[\u0900-\u097F]/g;     // Devanagari — Hindi
 const hits = (s, re) => (s.match(re) || []).length;
 
 function detectLang(text){
@@ -284,8 +318,15 @@ function detectLang(text){
      toward English. */
   const body = t.replace(/https?:\/\/\S+/g, " ").replace(/#[\wÀ-ỹ]+/g, " ")
                 .replace(/@[\w.]+/g, " ").trim();
-  if(body.replace(/[^A-Za-zÀ-ỹ฀-๿一-鿿]/g, "").length < 4)
+  if(body.replace(/[^A-Za-zÀ-ỹ฀-๿一-鿿\u0900-\u097F]/g, "").length < 4)
     return { lang:"", why:"too little text to tell" };
+
+  /* Hindi by its script. Hindi captions carry English team and tournament names ("PAK vs IND",
+     "Asian Games"), so the share of Devanagari is weighed against the Latin letters rather than
+     asking for none of them; a stray Hindi word in an English caption stays English. */
+  const deva = hits(body, RX_DEVA), latin = body.replace(/[^A-Za-z]/g, "").length;
+  if(deva >= 4 && deva >= latin * 0.25)
+    return { lang:"hi", why:`Devanagari script — ${deva} Hindi letter(s) vs ${latin} Latin` };
 
   if(RX_THAI.test(body)) return { lang:"th", why:"Thai script" };
   if(RX_CJK.test(body))  return { lang:"zh", why:"Chinese characters" };
@@ -1220,8 +1261,8 @@ function chanLabel(s){
    drops in two languages; Brazil keeps its own. The report is drawn one region at a time — measured
    against each other's drops, every channel of the other region would read as missing — while a
    press still reads every channel of every region. */
-const REGIONS = [["main", "Vietnam & English"], ["br", "Brazil"]];
-const regionOf = s => s.region || "main";
+const REGIONS = ORG.regions;
+const regionOf = s => s.region || REGIONS[0][0];
 /* which region is on screen — "all" (the default) draws every region at once, each judged on its own */
 const regionSel = () => (REGIONS.some(r => r[0] === checks.regionView) ? checks.regionView : "all");
 
@@ -1697,7 +1738,7 @@ function downloadReportCard(rep, o, wo){
     y += 24;
 
     /* channels, grouped by language */
-    const LGNAME = { vi: "Vietnamese", en: "English", th: "Thai", zh: "Chinese", pt: "Portuguese", "—": "Other" };
+    const LGNAME = { vi: "Vietnamese", en: "English", th: "Thai", zh: "Chinese", pt: "Portuguese", hi: "Hindi", "—": "Other" };
     for(const lg of rep.langs){
       const group = rows.filter(r => (r.lang || "—") === lg);
       if(!group.length) continue;
@@ -1750,7 +1791,7 @@ function downloadReportCard(rep, o, wo){
         if(!b) return toast("Could not build the image", "triangle-alert");
         const a = document.createElement("a");
         a.href = URL.createObjectURL(b);
-        a.download = "sportsfc-daily-" + (wo.date || contentDate(rep.to, tz)) + ".png";
+        a.download = ORG.id + "-daily-" + (wo.date || contentDate(rep.to, tz)) + ".png";
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         toast("Report card downloaded", "check-check");
@@ -1788,7 +1829,7 @@ async function boot(){
 return {
   get checks(){ return checks; }, get cloud(){ return cloud; }, get apifyInfo(){ return apifyInfo; },
   get extReady(){ return extReady; }, get extVersion(){ return extVersion; }, extStale, EXT_WANT, EXT_PLATFORMS,
-  SPORTSFC, DEF_PLATFORMS, platform, safeUrl, pretty, chanLabel, REGIONS, regionOf, regionSel, dcChannels,
+  SPORTSFC, ORG, BRANDS, DEF_PLATFORMS, platform, safeUrl, pretty, chanLabel, REGIONS, regionOf, regionSel, dcChannels,
   reconcile, mergeReports, detectLang, normLang, contentDate, hhmm, hhmmss, fmtWhen, fmtGap, dayRange,
   windowOpt, tzLabel, TZS, WINDOWS, CELL, compact, num2, dur, clean, thumbSrc,
   collectServer, runEverything, absorbBrowserRun, refreshApifyUsage, downloadReportCard,

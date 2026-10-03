@@ -34,7 +34,6 @@ const SB_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const ADMIN  = process.env.ADMIN_PASSWORD || "";
 const TABLE  = "orghub_state";
-const ROW_ID = 3;
 
 /* a report is small — counts, a few captions, some confirms. Cap the stored blob well under any
    Postgres/PostgREST limit so a runaway client (or a bad actor) cannot bloat the row. */
@@ -56,13 +55,19 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(x, y);
 }
 
+/* one row per brand: SportsFC keeps row 3, MatchPulse has row 4. Only known brands are accepted —
+   an unknown name can never pick an arbitrary row of the shared table. */
+const BRAND_ROWS = { sportsfc: 3, matchpulse: 4 };
+
 module.exports = async (req, res) => {
+  const ROW_ID = BRAND_ROWS[(req.query && req.query.brand) || "sportsfc"];
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-admin-key");
   res.setHeader("Access-Control-Allow-Methods", "GET, PUT, OPTIONS");
   res.setHeader("Cache-Control", "no-store, max-age=0");
 
   if (req.method === "OPTIONS") return res.status(204).end();
+  if (!ROW_ID) return res.status(400).json({ ok: false, error: "Unknown brand." });
 
   /* ---------------- not configured: local mode ---------------- */
   if (!configured()) {

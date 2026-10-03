@@ -22,6 +22,25 @@ SportsFC publishes the same content — match previews, highlight reels, stat gr
 | TikTok | `@sportsfc.vn` | — |
 | Telegram bot | `@SportsfcBot` | — |
 
+**MatchPulse** (added 2026-10-04) is a second brand on the same site — its own overview and report
+at `#/matchpulse`. Nine channels, the same content in **Hindi and English**:
+
+| Platform | Hindi | English |
+|---|---|---|
+| Facebook | `MPXI.Hindi` | `ai.matchpulse` |
+| Instagram | `matchpulse.hindi.ai` | `matchpulse.ai` |
+| Telegram | `matchpulseaihindi` | `matchpulseai` |
+| YouTube | `@MPHindi.Cricket` | `@matchpulse-ai` |
+| TikTok | — | `@matchpulse.ai` |
+
+The two languages go out on their own clocks — the same post measured 20:44 in English and 21:21
+in Hindi — so each language is its own **region**, judged on its own drops; judged together, every
+drop would split in two and every channel would read as missing half of them. Hindi captions are
+Devanagari with English match names in them ("PAK vs IND … रोमांचक टक्कर"), so Hindi is detected by
+the script's share of the letters, not by its presence. Every channel is read the same way as
+SportsFC's — Facebook, Instagram and TikTok free first, Apify only as the fallback — and the report
+defaults to India time.
+
 Every day the check answers one question:
 
 > **Did today's content actually reach every channel — in the right language?**

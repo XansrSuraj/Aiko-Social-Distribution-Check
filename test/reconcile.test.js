@@ -44,6 +44,8 @@ const boot = `
   const platform = id => ({ name:id });
   const safeUrl = u => u;
   const pretty = u => u;
+  const ORG = { id:"sportsfc", regions:[["main", "Vietnam & English"], ["br", "Brazil"]], tz:7 };
+  const BRAND_SUFFIX = "", REPORT_URL = "api/report";
 `;
 const M = new Function("ST", boot + src +
   "\n;return { reconcile, detectLang, clusterSlots, mergeLate, sigScore, normLang, chanLabel," +
@@ -107,6 +109,28 @@ ok(M.detectLang("https://sfc.my/r/TYQDDcDN").lang === "", "a bare link carries n
 /* hashtags are usually English even on a Vietnamese post, so they must not tip the balance */
 ok(M.detectLang("Một cuộc tranh luận #football #match #the #and").lang === "vi",
   "English hashtags do not override Vietnamese body text");
+
+/* Hindi (MatchPulse, 2026-10-04) — real captions from the Hindi and English channels. The Hindi
+   ones carry English match names, so it is the script's share that decides, not its presence. */
+const HI = [
+  "https://cta.matchpulse.ai/r/ln57puvK वर्ल्ड इवेंट्स में पाकिस्तान पर भारत का दबदबा भारत ने",
+  "PAK vs IND 👀 🏆 Asian Games in Japan Men's 🏏🔥 रोमांचक टक्कर — आपका दांव किस पर? 👉 विजेता",
+  "IND vs WI 👀 🏆 West Indies tour of India 🏏🔥 एक मैदान, दो टीमें — बाज़ी किसकी?",
+  "शुभमन गिल - ODI में शानदार शुरुआत शुभमन गिल ने गुवाहाटी में ODI क्रिकेट इतिहास का सबसे तेज",
+];
+for (const t of HI) {
+  const d = M.detectLang(t);
+  ok(d.lang === "hi", `hi: "${t.replace(/https?:\/\/\S+\s*/, "").slice(0, 40)}…"`, d.lang || "(none)");
+}
+const EN_MP = [
+  "INDIA'S DOMINATION OF PAKISTAN AT WORLD EVENTS India has dominated arch-rivals Pakistan in",
+  "PAK vs IND 👀 🏆 Asian Games in Japan Men's 🏏🔥 Game on! Who draws first blood? 👉 Your pick",
+  "IND vs WI 👀 🏆 West Indies tour of India 🏏🔥 Two sides, one prize. Who takes the glory?",
+];
+for (const t of EN_MP) ok(M.detectLang(t).lang === "en", `en (MatchPulse): "${t.slice(0, 40)}…"`, M.detectLang(t).lang || "(none)");
+ok(M.detectLang("Who wins tonight? India vs Pakistan, the big one — your pick? भारत").lang === "en",
+  "one stray Hindi word in an English caption stays English");
+ok(M.normLang("hindi") === "hi" && M.normLang("english") === "en", "a channel noted Hindi is hi");
 
 /* ═══════════════════ reconcile ═══════════════════ */
 const CHANNELS = [

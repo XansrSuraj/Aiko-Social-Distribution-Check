@@ -54,6 +54,31 @@ globalThis.window = globalThis;
   E.resetReport();
   ok(Object.keys(E.checks.posts).length === 0 && E.checks.window === "24", "Delete report clears posts but keeps the settings");
 
+  console.log("── MatchPulse, a second brand");
+  const MP = createEngine({ brand: "matchpulse", toast() {}, onChange() {} });
+  const mp = MP.dcChannels(MP.ORG);
+  ok(MP.ORG.name === "MatchPulse" && mp.length === 9, "9 MatchPulse channels", String(mp.length));
+  ok(MP.REGIONS.map(r => r[0]).join() === "hi,en", "two regions, Hindi and English");
+  ok(MP.dcChannels(MP.ORG, "hi").every(c => c.lang === "hi") && MP.dcChannels(MP.ORG, "en").every(c => c.lang === "en"),
+     "every Hindi channel is hi, every English one en");
+  ok(mp.every(c => c.id.startsWith("mp-")) && !mp.some(c => all.some(s => s.id === c.id)), "no channel id shared with SportsFC");
+  ok(MP.checks.tz === 5.5, "MatchPulse reports in India time by default");
+  MP.update(c => {
+    /* the same post, measured: English at 20:44, Hindi at 21:21 — two regions, each one drop */
+    c.window = "24";
+    c.posts["mp-tg-en"] = [{ externalId: "e1", ts: at(80), text: "PAK vs IND 👀 Game on! Who draws first blood? Your pick" }];
+    c.posts["mp-yt-en"] = [{ externalId: "e2", ts: at(79), text: "PAK vs IND 👀 Game on! Who draws first blood? Your pick" }];
+    c.posts["mp-tg-hi"] = [{ externalId: "h1", ts: at(43), text: "PAK vs IND 👀 रोमांचक टक्कर — आपका दांव किस पर? विजेता" }];
+    c.posts["mp-yt-hi"] = [{ externalId: "h2", ts: at(42), text: "PAK vs IND 👀 रोमांचक टक्कर — आपका दांव किस पर? विजेता" }];
+  });
+  ok(JSON.parse(store["orghub.checks.matchpulse"] || "{}").posts["mp-tg-hi"], "saved under its own key");
+  ok(!JSON.parse(store["orghub.checks"] || "{}").posts["mp-tg-hi"], "and never into SportsFC's report");
+  const mopt = { tz: 5.5, win: 15, maxPerPeriod: 4, ...MP.windowOpt() };
+  const mrep = MP.mergeReports(MP.REGIONS.map(([id, name]) => ({ region: id, name, rep: MP.reconcile(MP.dcChannels(MP.ORG, id), mopt) })));
+  ok(mrep.slots.length === 2 && mrep.slots.every(s => s.present.length === 2),
+     "37 minutes apart in two languages = one drop in each region, not two half-missed ones", `${mrep.slots.length} drop(s)`);
+  ok(!mrep.alerts.some(a => a.kind === "lang"), "Hindi captions on the Hindi channels raise no language flag");
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

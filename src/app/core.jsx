@@ -9,30 +9,46 @@ const Ctx = createContext(null);
 const TOAST_ICONS = { check: Check, "check-check": CheckCheck, copy: Copy, download: Download, "trash-2": Trash2,
   "triangle-alert": TriangleAlert, info: Info, loader: Loader2, chrome: Bell, "circle-alert": CircleAlert };
 
+/* ── brands: each has its own engine, channels and report; the route says which is on screen ── */
+export const BRANDS = [
+  { id: "sportsfc", name: "SportsFC", base: "" },
+  { id: "matchpulse", name: "MatchPulse", base: "/matchpulse" },
+];
+export const brandOf = route => BRANDS.find(b => b.base && (route === b.base || route.startsWith(b.base + "/"))) || BRANDS[0];
+
 export function EngineProvider({ children }) {
   const [ver, bump] = useReducer(n => n + 1, 0);
   const [toasts, setToasts] = useState([]);
-  const [running, setRunning] = useState(false);
-  const engineRef = useRef(null);
+  const [running, setRunning] = useState({});           // brand id -> a check is in progress
+  const engines = useRef({});
+  const route = useRoute();
+  const brand = brandOf(route);
   const toast = useCallback((msg, icon) => {
     const id = Math.random().toString(36).slice(2);
     setToasts(t => [...t.filter(x => x.icon !== "loader" || icon === "loader").slice(-2), { id, msg, icon }]);
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), icon === "loader" ? 6000 : 3200);
   }, []);
-  if (!engineRef.current) engineRef.current = createEngine({ toast: (m, i) => toast(m, i), onChange: () => bump() });
-  const E = engineRef.current;
-  useEffect(() => { E.boot(); }, [E]);
+  /* created on first visit and kept, so switching brands mid-check loses nothing */
+  if (!engines.current[brand.id]) {
+    const e = createEngine({ brand: brand.id, toast: (m, i) => toast(m, i), onChange: () => bump() });
+    engines.current[brand.id] = e;
+  }
+  const E = engines.current[brand.id];
+  const booted = useRef(new Set());
+  useEffect(() => { if (!booted.current.has(brand.id)) { booted.current.add(brand.id); E.boot(); } }, [E, brand.id]);
 
-  /* one press reads every channel of every region; the page follows along as results arrive */
+  /* one press reads every channel of every region of this brand; the page follows along */
   const run = useCallback(async (serverOnly) => {
-    if (running) return;
-    setRunning(true);
-    try { if (serverOnly) { await E.collectServer(E.SPORTSFC); E.absorbBrowserRun(); } else await E.runEverything(E.SPORTSFC); }
-    finally { setRunning(false); bump(); }
-  }, [E, running]);
+    const id = brand.id;
+    if (running[id]) return;
+    setRunning(r => ({ ...r, [id]: true }));
+    try { if (serverOnly) { await E.collectServer(E.ORG); E.absorbBrowserRun(); } else await E.runEverything(E.ORG); }
+    finally { setRunning(r => ({ ...r, [id]: false })); bump(); }
+  }, [E, brand.id, running]);
 
   /* ver changes on every engine redraw, so every page reading the engine repaints with it */
-  const value = useMemo(() => ({ E, ver, toast, running, run, refresh: bump }), [E, ver, toast, running, run]);
+  const value = useMemo(() => ({ E, ver, toast, running: !!running[brand.id], run, refresh: bump, route, brand,
+    path: p => brand.base + p }), [E, ver, toast, running, run, route, brand]);
   return (
     <Ctx.Provider value={value}>
       {children}
@@ -45,7 +61,7 @@ export function EngineProvider({ children }) {
 }
 export const useApp = () => useContext(Ctx);
 
-/* ── a two-page hash router: #/ and #/report ── */
+/* ── a small hash router: #/ and #/report for SportsFC, #/matchpulse and #/matchpulse/report ── */
 export function useRoute() {
   const get = () => (location.hash.replace(/^#/, "") || "/");
   const [route, setRoute] = useState(get);

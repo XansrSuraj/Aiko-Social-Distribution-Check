@@ -2,7 +2,7 @@
    data half of the old dailyCheckModal() draw(). No markup here: components read this object. */
 
 export function buildReport(E) {
-  const o = E.SPORTSFC;
+  const o = E.ORG;
   const checks = E.checks;
   const view = E.regionSel();
   const chans = E.dcChannels(o, view === "all" ? undefined : view);
@@ -76,7 +76,7 @@ export function buildReport(E) {
 }
 
 /* ── shared helpers for the content views ── */
-export const LANG_NAME = { vi: "Vietnamese", en: "English", pt: "Portuguese", th: "Thai", zh: "Chinese" };
+export const LANG_NAME = { vi: "Vietnamese", en: "English", pt: "Portuguese", hi: "Hindi", th: "Thai", zh: "Chinese" };
 
 /* Instagram's own page summary leads with 'N likes, N comments - handle on DATE: "' — the platform's
    wrapper, not the caption */
