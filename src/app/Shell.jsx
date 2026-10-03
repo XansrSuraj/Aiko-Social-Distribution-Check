@@ -4,7 +4,7 @@ import { useApp, go } from "./core.jsx";
 
 export const Mark = () => (
   <span className="brand-mark" aria-hidden="true">
-    <svg viewBox="0 0 24 24"><path d="M5 18 L12 5 L19 18" fill="none" stroke="var(--mark-ink,#fff)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+    <svg viewBox="0 0 24 24"><path d="M5 18 L12 5 L19 18" fill="none" stroke="var(--mark-ink,#f3efe7)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx="12" cy="14.6" r="2" fill="#e31f24" /></svg>
   </span>
 );
@@ -13,7 +13,7 @@ export function Nav({ route }) {
   const { run, running } = useApp();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  /* over the dark hero the bar is see-through and white; past it, or on any other page, it turns solid */
+  /* over the dark hero the bar is see-through with light text; past it, or on any other page, it turns solid */
   const darkTop = route === "/";
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 24);
@@ -25,7 +25,7 @@ export function Nav({ route }) {
   const link = (href, label) => <a href={"#" + href} className={route === href ? "on" : ""}>{label}</a>;
   return (
     <>
-      <header className={`nav${solid ? " solid" : ""}`} style={{ "--mark-ink": solid ? "#fff" : "#0b0b0c" }}>
+      <header className={`nav${solid ? " solid" : ""}`} style={{ "--mark-ink": solid ? "#f3efe7" : "#0b0b0c" }}>
         <div className="wrap">
           <a href="#/" className="brand" aria-label="SportsFC daily check — home"><Mark />SportsFC<small>Daily check</small></a>
           <nav className="nav-links" aria-label="Main">
